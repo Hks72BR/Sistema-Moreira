@@ -3,13 +3,14 @@ import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { getStorage } from 'firebase/storage';
 
+// Fallback com valores padrão (substituídos durante build do Vite)
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCjUUnaaW2DitQWA3sHHUAubwQxCMBUCco',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'sistema-moreira.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'sistema-moreira',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'sistema-moreira.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '239700417466',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:239700417466:web:7449c74f223e41b68a9b83'
 };
 
 const app = initializeApp(firebaseConfig);
