@@ -140,7 +140,7 @@
 
 <div align="center">
   
-  ### Desenvolvido com ❤️ para melhorar a eficiência da sua oficina
+  ### Desenvolvido Por HRDJ Tech para melhorar a eficiência da sua oficina
   
   [Versão Atual: 1.0.1](https://github.com/Hks72BR/Sistema-Moreira/releases) • [Report Issues](#)
   
