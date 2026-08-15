@@ -1,6 +1,6 @@
 {
   "name": "moreira-direcoes",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Sistema de Gestão - Moreira Direções",
   "main": "electron/main.js",
   "scripts": {
