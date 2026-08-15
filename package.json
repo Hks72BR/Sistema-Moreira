@@ -8,12 +8,15 @@
     "dev:electron": "concurrently \"vite\" \"npx wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
     "build:electron": "vite build && electron-builder --win portable",
+    "make": "npm run build && electron-builder --win",
+    "make:publish": "npm run build && electron-builder --win --publish always",
     "start": "electron .",
     "firebase:deploy": "firebase deploy --token $FIREBASE_TOKEN"
   },
   "dependencies": {
     "browser-image-compression": "^2.0.2",
     "cloudinary": "^2.10.0",
+    "electron-updater": "^6.8.9",
     "firebase": "^12.13.0",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
@@ -59,6 +62,11 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Moreira Direções",
       "artifactName": "MoreiraDirecoes-Setup-${version}.exe"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Hks72BR",
+      "repo": "Sistema-Moreira"
     }
   }
 }

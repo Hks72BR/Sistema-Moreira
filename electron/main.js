@@ -1,4 +1,5 @@
 const { app, BrowserWindow, Tray, Menu, dialog, ipcMain } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 
@@ -6,6 +7,11 @@ let mainWindow;
 let tray;
 
 const isDev = !app.isPackaged;
+
+// ── Auto-Update Configuration ──
+if (!isDev) {
+  autoUpdater.checkForUpdatesAndNotify();
+}
 
 // ── Pasta de fotos local ──
 const PHOTOS_DIR = isDev
@@ -97,6 +103,12 @@ function createTray() {
         }
       }
     },
+    {
+      label: 'Verificar Atualizações',
+      click: () => {
+        autoUpdater.checkForUpdatesAndNotify();
+      }
+    },
     { type: 'separator' },
     {
       label: 'Sair',
@@ -118,7 +130,46 @@ function createTray() {
   });
 }
 
+// ── Auto-Update Event Listeners ──
+function setupAutoUpdater() {
+  if (isDev) return;
+
+  autoUpdater.on('update-available', () => {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Atualização Disponível',
+      message: 'Uma nova versão está disponível!',
+      detail: 'A atualização será baixada em background. O app será reiniciado quando concluir.',
+      buttons: ['OK']
+    });
+  });
+
+  autoUpdater.on('update-downloaded', () => {
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Atualização Pronta',
+      message: 'Atualização baixada e pronta para instalar!',
+      detail: 'O app será reiniciado para aplicar as mudanças.',
+      buttons: ['Reiniciar Agora', 'Depois']
+    }).then((result) => {
+      if (result.response === 0) {
+        autoUpdater.quitAndInstall();
+      }
+    });
+  });
+
+  autoUpdater.on('error', (error) => {
+    console.error('Auto-updater error:', error);
+  });
+
+  // Verificar atualizações a cada 1 hora
+  setInterval(() => {
+    autoUpdater.checkForUpdates();
+  }, 3600000);
+}
+
 app.whenReady().then(() => {
+  setupAutoUpdater();
   createWindow();
   createTray();
 });
