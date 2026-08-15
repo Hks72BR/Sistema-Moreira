@@ -1,0 +1,21 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Photos organized by company
+    match /companies/{companyId}/photos/{allPaths=**} {
+      // Read: authenticated user that belongs to the company
+      allow read: if request.auth != null &&
+        firestore.exists(/databases/(default)/documents/companies/$(companyId)/users/$(request.auth.uid));
+
+      // Upload: authenticated, max 500KB, image only
+      allow create: if request.auth != null &&
+        firestore.exists(/databases/(default)/documents/companies/$(companyId)/users/$(request.auth.uid)) &&
+        request.resource.size < 500 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+
+      // Delete: authenticated user of the company
+      allow delete: if request.auth != null &&
+        firestore.exists(/databases/(default)/documents/companies/$(companyId)/users/$(request.auth.uid));
+    }
+  }
+}

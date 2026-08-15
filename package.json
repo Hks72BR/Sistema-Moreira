@@ -1,0 +1,62 @@
+{
+  "name": "moreira-direcoes",
+  "version": "1.0.0",
+  "description": "Sistema de Gestão - Moreira Direções",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "dev:electron": "concurrently \"vite\" \"npx wait-on http://localhost:5173 && electron .\"",
+    "build": "vite build",
+    "build:electron": "vite build && electron-builder --win portable",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "browser-image-compression": "^2.0.2",
+    "cloudinary": "^2.10.0",
+    "firebase": "^12.13.0",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "next-cloudinary": "^6.18.8"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "concurrently": "^9.0.0",
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
+    "png-to-ico": "^3.0.1",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "react-router-dom": "^6.28.0",
+    "sharp": "^0.34.5",
+    "vite": "^5.4.0",
+    "wait-on": "^9.0.10"
+  },
+  "build": {
+    "appId": "com.moreira.direcoes",
+    "productName": "Moreira Direções",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "public/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "public/icon.ico",
+      "uninstallerIcon": "public/icon.ico",
+      "installerHeaderIcon": "public/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Moreira Direções",
+      "artifactName": "MoreiraDirecoes-Setup-${version}.exe"
+    }
+  }
+}

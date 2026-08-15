@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helpers
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function belongsToCompany(companyId) {
+      return isAuthenticated() &&
+        exists(/databases/$(database)/documents/companies/$(companyId)/users/$(request.auth.uid));
+    }
+
+    function getUserRole(companyId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin(companyId) {
+      return getUserRole(companyId) == 'admin';
+    }
+
+    function isAdminOrManager(companyId) {
+      return getUserRole(companyId) in ['admin', 'gerente'];
+    }
+
+    // Company document (settings)
+    match /companies/{companyId} {
+      allow read: if belongsToCompany(companyId);
+      allow write: if isAdminOrManager(companyId);
+
+      // Users
+      match /users/{userId} {
+        allow read: if belongsToCompany(companyId);
+        allow create, update, delete: if isAdmin(companyId);
+      }
+
+      // Clients
+      match /clients/{clientId} {
+        allow read, create, update, delete: if belongsToCompany(companyId);
+      }
+
+      // Vehicles
+      match /vehicles/{vehicleId} {
+        allow read, create, update, delete: if belongsToCompany(companyId);
+      }
+
+      // Budgets + items subcollection
+      match /budgets/{budgetId} {
+        allow read, create, update, delete: if belongsToCompany(companyId);
+
+        match /items/{itemId} {
+          allow read, create, update, delete: if belongsToCompany(companyId);
+        }
+      }
+
+      // Service Orders + subcollections
+      match /serviceOrders/{orderId} {
+        allow read, create, update, delete: if belongsToCompany(companyId);
+
+        match /items/{itemId} {
+          allow read, create, update, delete: if belongsToCompany(companyId);
+        }
+
+        match /photos/{photoId} {
+          allow read, create, update, delete: if belongsToCompany(companyId);
+        }
+
+        match /logs/{logId} {
+          allow read, create: if belongsToCompany(companyId);
+          allow update, delete: if false; // Logs são imutáveis
+        }
+      }
+
+      // Invoices
+      match /invoices/{invoiceId} {
+        allow read, create, update: if belongsToCompany(companyId);
+        allow delete: if isAdmin(companyId);
+      }
+    }
+  }
+}
