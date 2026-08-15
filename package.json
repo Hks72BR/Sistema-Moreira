@@ -8,7 +8,8 @@
     "dev:electron": "concurrently \"vite\" \"npx wait-on http://localhost:5173 && electron .\"",
     "build": "vite build",
     "build:electron": "vite build && electron-builder --win portable",
-    "start": "electron ."
+    "start": "electron .",
+    "firebase:deploy": "firebase deploy --token $FIREBASE_TOKEN"
   },
   "dependencies": {
     "browser-image-compression": "^2.0.2",
@@ -25,6 +26,7 @@
     "concurrently": "^9.0.0",
     "electron": "^42.2.0",
     "electron-builder": "^26.8.1",
+    "firebase-tools": "^15.27.0",
     "png-to-ico": "^3.0.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
