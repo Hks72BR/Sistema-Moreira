@@ -1,8 +1,7 @@
-import { compressPhoto, compressBase64Photo } from './photoCompression';
+import { compressPhoto, compressBase64Photo } from "./photoCompression";
 
-const CLOUDINARY_AVAILABLE = !!import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
-const API_KEY = import.meta.env.VITE_CLOUDINARY_API_KEY;
+const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME || 'fzqgvehn';
+const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET || 'moreira_direcoes';
 
 /**
  * Upload de foto para Cloudinary
@@ -13,13 +12,8 @@ const API_KEY = import.meta.env.VITE_CLOUDINARY_API_KEY;
  * @returns {Promise<{storagePath, downloadUrl, filename}>}
  */
 export async function uploadPhotoFile(companyId, orderId, file, filename) {
-  if (!CLOUDINARY_AVAILABLE) {
-    console.warn('Cloudinary não está ativado. Fotos não serão enviadas.');
-    return {
-      storagePath: '',
-      downloadUrl: '',
-      filename: filename || `os-${orderId}-${Date.now()}.jpg`
-    };
+  if (!CLOUD_NAME || !UPLOAD_PRESET) {
+    throw new Error("Cloudinary não está configurado para enviar fotos.");
   }
 
   try {
@@ -29,19 +23,25 @@ export async function uploadPhotoFile(companyId, orderId, file, filename) {
 
     // Preparar FormData para upload
     const formData = new FormData();
-    formData.append('file', compressed);
-    formData.append('public_id', `moreira-direcoes/${companyId}/${name}`);
-    formData.append('folder', `moreira-direcoes/${companyId}/photos`);
-    formData.append('resource_type', 'auto');
-    formData.append('api_key', API_KEY);
+    formData.append("file", compressed);
+    formData.append("upload_preset", UPLOAD_PRESET);
+    formData.append("folder", `moreira-direcoes/photos`);
+    formData.append("public_id", name.replace(/\.[^/.]+$/, ""));
+
+    console.log("Cloudinary upload:", {
+      CLOUD_NAME,
+      UPLOAD_PRESET: !!UPLOAD_PRESET,
+    });
 
     // Upload para Cloudinary
     const response = await fetch(
       `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-      { method: 'POST', body: formData }
+      { method: "POST", body: formData },
     );
 
     if (!response.ok) {
+      const errorData = await response.text();
+      console.error("Cloudinary error response:", errorData);
       throw new Error(`Cloudinary upload failed: ${response.statusText}`);
     }
 
@@ -51,7 +51,7 @@ export async function uploadPhotoFile(companyId, orderId, file, filename) {
 
     return { storagePath, downloadUrl, filename: name };
   } catch (error) {
-    console.error('Erro ao fazer upload da foto:', error);
+    console.error("Erro ao fazer upload da foto:", error);
     throw error;
   }
 }
@@ -64,34 +64,37 @@ export async function uploadPhotoFile(companyId, orderId, file, filename) {
  * @returns {Promise<{storagePath, downloadUrl, filename}>}
  */
 export async function uploadPhotoBase64(companyId, orderId, base64String) {
-  if (!CLOUDINARY_AVAILABLE) {
-    console.warn('Cloudinary não está ativado. Fotos não serão enviadas.');
-    return {
-      storagePath: '',
-      downloadUrl: '',
-      filename: `os-${orderId}-${Date.now()}.jpg`
-    };
+  if (!CLOUD_NAME || !UPLOAD_PRESET) {
+    throw new Error("Cloudinary não está configurado para enviar fotos.");
   }
 
   try {
+    // Comprimir base64 (converte para File também)
+    const compressedFile = await compressBase64Photo(base64String);
     const ts = Date.now();
     const name = `os-${orderId}-${ts}.jpg`;
 
     // Preparar FormData para upload
     const formData = new FormData();
-    formData.append('file', base64String);
-    formData.append('public_id', `moreira-direcoes/${companyId}/${name}`);
-    formData.append('folder', `moreira-direcoes/${companyId}/photos`);
-    formData.append('resource_type', 'auto');
-    formData.append('api_key', API_KEY);
+    formData.append("file", compressedFile);
+    formData.append("upload_preset", UPLOAD_PRESET);
+    formData.append("folder", `moreira-direcoes/photos`);
+    formData.append("public_id", name.replace(/\.[^/.]+$/, ""));
+
+    console.log("Cloudinary upload:", {
+      CLOUD_NAME,
+      UPLOAD_PRESET: !!UPLOAD_PRESET,
+    });
 
     // Upload para Cloudinary
     const response = await fetch(
       `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-      { method: 'POST', body: formData }
+      { method: "POST", body: formData },
     );
 
     if (!response.ok) {
+      const errorData = await response.text();
+      console.error("Cloudinary error response:", errorData);
       throw new Error(`Cloudinary upload failed: ${response.statusText}`);
     }
 
@@ -101,33 +104,7 @@ export async function uploadPhotoBase64(companyId, orderId, base64String) {
 
     return { storagePath, downloadUrl, filename: name };
   } catch (error) {
-    console.error('Erro ao fazer upload da foto base64:', error);
+    console.error("Erro ao fazer upload da foto base64:", error);
     throw error;
   }
-}
-
-/**
- * Deletar foto do Cloudinary
- * @param {String} storagePath - public_id da foto no Cloudinary
- */
-export async function deletePhotoFromStorage(storagePath) {
-  if (!CLOUDINARY_AVAILABLE || !storagePath) return;
-
-  // Nota: Cloudinary requer API Secret para deletar via API
-  // Para V1, vamos apenas logar e não deletar (opção segura)
-  console.log('Deleção de fotos no Cloudinary requer API Secret');
-  // TODO: Implementar deleção via backend quando houver Cloud Function
-}
-
-/**
- * Obter URL da foto do Cloudinary
- * @param {String} storagePath - public_id da foto
- * @returns {Promise<String>} URL pública da foto
- */
-export async function getPhotoURL(storagePath) {
-  if (!CLOUDINARY_AVAILABLE || !storagePath) return '';
-
-  // Cloudinary retorna URL segura no upload
-  // Se precisar regenerar, usar: https://res.cloudinary.com/{cloud_name}/image/upload/{public_id}
-  return `https://res.cloudinary.com/${CLOUD_NAME}/image/upload/w_1280,q_auto/${storagePath}`;
 }

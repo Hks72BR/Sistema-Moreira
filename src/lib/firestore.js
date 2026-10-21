@@ -1,10 +1,10 @@
 import {
-  collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
-  query, where, orderBy, limit, startAfter, serverTimestamp,
-  writeBatch, getCountFromServer, Timestamp
+  collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc,
+  query, where, orderBy, limit, onSnapshot, serverTimestamp,
+  writeBatch, getCountFromServer, runTransaction
 } from 'firebase/firestore';
 import { db, COMPANY_ID } from './firebase';
-import { uploadPhotoFile, uploadPhotoBase64, deletePhotoFromStorage } from './storage';
+import { uploadPhotoFile, uploadPhotoBase64 } from './storage';
 
 // ═══ Helpers ═══
 
@@ -33,6 +33,12 @@ function snapToList(snap) {
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
+function mergeSnapshots(...snapshots) {
+  const documents = new Map();
+  snapshots.flatMap(snapToList).forEach(document => documents.set(document.id, document));
+  return [...documents.values()];
+}
+
 function tsToISO(ts) {
   if (!ts) return null;
   if (ts.toDate) return ts.toDate().toISOString();
@@ -45,6 +51,49 @@ function formatDoc(d) {
   for (const key of Object.keys(result)) {
     if (result[key] && result[key].toDate) {
       result[key] = result[key].toDate().toISOString();
+    }
+  }
+  const aliases = {
+    cpf_cnpj: 'cpfCnpj',
+    zip_code: 'zipCode',
+    client_id: 'clientId',
+    vehicle_id: 'vehicleId',
+    budget_id: 'budgetId',
+    client_name: 'clientName',
+    client_phone: 'clientPhone',
+    client_cpf_cnpj: 'clientCpfCnpj',
+    client_email: 'clientEmail',
+    client_address: 'clientAddress',
+    client_city: 'clientCity',
+    client_state: 'clientState',
+    make: 'vehicleMake',
+    model: 'vehicleModel',
+    plate: 'vehiclePlate',
+    year: 'vehicleYear',
+    steering_type: 'vehicleSteeringType',
+    color: 'vehicleColor',
+    chassis: 'vehicleChassis',
+    unit_price: 'unitPrice',
+    valid_until: 'validUntil',
+    assigned_to: 'assignedTo',
+    assigned_to_name: 'assignedToName',
+    services_performed: 'servicesPerformed',
+    parts_used: 'partsUsed',
+    km_entry: 'kmEntry',
+    km_exit: 'kmExit',
+    estimated_completion: 'estimatedCompletion',
+    created_by: 'createdBy',
+    created_by_name: 'createdByName',
+    approved_at: 'approvedAt',
+    started_at: 'startedAt',
+    completed_at: 'completedAt',
+    delivered_at: 'deliveredAt',
+    created_at: 'createdAt',
+    updated_at: 'updatedAt',
+  };
+  for (const [snakeCase, camelCase] of Object.entries(aliases)) {
+    if (result[snakeCase] === undefined && result[camelCase] !== undefined) {
+      result[snakeCase] = result[camelCase];
     }
   }
   return result;
@@ -77,7 +126,7 @@ export async function getClients({ search = '', page = 1, limitCount = 50 } = {}
     const s = search.toLowerCase();
     const filtered = all.filter(c =>
       (c.name || '').toLowerCase().includes(s) ||
-      (c.cpfCnpj || '').includes(s) ||
+      (c.cpf_cnpj || c.cpfCnpj || '').includes(s) ||
       (c.phone || '').includes(s) ||
       (c.email || '').toLowerCase().includes(s)
     );
@@ -101,24 +150,48 @@ export async function getClients({ search = '', page = 1, limitCount = 50 } = {}
   };
 }
 
-export async function getClient(clientId) {
+export async function getClientBasic(clientId) {
   const snap = await getDoc(docRef(`clients/${clientId}`));
   if (!snap.exists()) throw new Error('Cliente não encontrado');
-  const client = formatDoc(toData(snap));
+  return formatDoc(toData(snap));
+}
 
-  // Veículos
-  const vSnap = await getDocs(query(col('vehicles'), where('clientId', '==', clientId), orderBy('createdAt', 'desc')));
-  const vehicles = snapToList(vSnap).map(formatDoc);
+export async function getClient(clientId) {
+  const client = await getClientBasic(clientId);
+  client.vehicles = [];
+  client.serviceOrders = [];
+  client.budgets = [];
 
-  // OS recentes
-  const osSnap = await getDocs(query(col('serviceOrders'), where('clientId', '==', clientId), orderBy('createdAt', 'desc'), limit(20)));
-  const serviceOrders = snapToList(osSnap).map(formatDoc);
+  // Carregar dados relacionados sem orderBy (sem exigir índices)
+  try {
+    const vSnap = await getDocs(query(col('vehicles'), where('clientId', '==', clientId)));
+    const vehicles = snapToList(vSnap).map(formatDoc).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    client.vehicles = vehicles;
+  } catch (e) { /* ok */ }
 
-  // Orçamentos recentes
-  const bSnap = await getDocs(query(col('budgets'), where('clientId', '==', clientId), orderBy('createdAt', 'desc'), limit(20)));
-  const budgets = snapToList(bSnap).map(formatDoc);
+  try {
+    const [legacySnap, currentSnap] = await Promise.all([
+      getDocs(query(col('serviceOrders'), where('clientId', '==', clientId), limit(20))),
+      getDocs(query(col('serviceOrders'), where('client_id', '==', clientId), limit(20))),
+    ]);
+    const serviceOrders = mergeSnapshots(legacySnap, currentSnap)
+      .map(formatDoc)
+      .sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt));
+    client.serviceOrders = serviceOrders;
+  } catch (e) { /* ok */ }
 
-  return { ...client, vehicles, serviceOrders, budgets };
+  try {
+    const [legacySnap, currentSnap] = await Promise.all([
+      getDocs(query(col('budgets'), where('clientId', '==', clientId), limit(20))),
+      getDocs(query(col('budgets'), where('client_id', '==', clientId), limit(20))),
+    ]);
+    const budgets = mergeSnapshots(legacySnap, currentSnap)
+      .map(formatDoc)
+      .sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt));
+    client.budgets = budgets;
+  } catch (e) { /* ok */ }
+
+  return client;
 }
 
 export async function createClient(data) {
@@ -168,8 +241,11 @@ export async function updateClient(clientId, data) {
 
 export async function deleteClient(clientId) {
   // Verificar se tem OS
-  const osSnap = await getDocs(query(col('serviceOrders'), where('clientId', '==', clientId), limit(1)));
-  if (!osSnap.empty) throw new Error('Não é possível excluir: cliente possui ordens de serviço');
+  const [legacySnap, currentSnap] = await Promise.all([
+    getDocs(query(col('serviceOrders'), where('clientId', '==', clientId), limit(1))),
+    getDocs(query(col('serviceOrders'), where('client_id', '==', clientId), limit(1))),
+  ]);
+  if (!legacySnap.empty || !currentSnap.empty) throw new Error('Não é possível excluir: cliente possui ordens de serviço');
   await deleteDoc(docRef(`clients/${clientId}`));
   return { message: 'Cliente excluído com sucesso' };
 }
@@ -177,8 +253,9 @@ export async function deleteClient(clientId) {
 // ═══ VEHICLES ═══
 
 export async function getVehiclesByClient(clientId) {
-  const snap = await getDocs(query(col('vehicles'), where('clientId', '==', clientId), orderBy('createdAt', 'desc')));
-  return snapToList(snap).map(formatDoc);
+  const snap = await getDocs(query(col('vehicles'), where('clientId', '==', clientId)));
+  const vehicles = snapToList(snap).map(formatDoc);
+  return vehicles.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 }
 
 export async function getVehicle(vehicleId) {
@@ -237,8 +314,11 @@ export async function updateVehicle(vehicleId, data) {
 }
 
 export async function deleteVehicle(vehicleId) {
-  const osSnap = await getDocs(query(col('serviceOrders'), where('vehicleId', '==', vehicleId), limit(1)));
-  if (!osSnap.empty) throw new Error('Não é possível excluir: veículo possui ordens de serviço');
+  const [legacySnap, currentSnap] = await Promise.all([
+    getDocs(query(col('serviceOrders'), where('vehicleId', '==', vehicleId), limit(1))),
+    getDocs(query(col('serviceOrders'), where('vehicle_id', '==', vehicleId), limit(1))),
+  ]);
+  if (!legacySnap.empty || !currentSnap.empty) throw new Error('Não é possível excluir: veículo possui ordens de serviço');
   await deleteDoc(docRef(`vehicles/${vehicleId}`));
   return { message: 'Veículo excluído com sucesso' };
 }
@@ -246,8 +326,9 @@ export async function deleteVehicle(vehicleId) {
 // ═══ BUDGETS ═══
 
 export async function getBudgets({ status, search = '', page = 1, limitCount = 50 } = {}) {
-  let constraints = [orderBy('createdAt', 'desc')];
-  if (status) constraints = [where('status', '==', status), ...constraints];
+  // Sem orderBy quando há where (evita exigir índice)
+  let constraints = [];
+  if (status) constraints = [where('status', '==', status)];
 
   const q = query(col('budgets'), ...constraints);
   const snap = await getDocs(q);
@@ -256,11 +337,14 @@ export async function getBudgets({ status, search = '', page = 1, limitCount = 5
   if (search) {
     const s = search.toLowerCase();
     list = list.filter(b =>
-      (b.clientName || '').toLowerCase().includes(s) ||
+      (b.client_name || b.clientName || '').toLowerCase().includes(s) ||
       (b.code || '').toLowerCase().includes(s) ||
-      (b.vehiclePlate || '').toLowerCase().includes(s)
+      (b.plate || b.vehiclePlate || '').toLowerCase().includes(s)
     );
   }
+
+  // Ordenar em JavaScript
+  list.sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt));
 
   const total = list.length;
   const start = (page - 1) * limitCount;
@@ -277,8 +361,29 @@ export async function getBudget(budgetId) {
   if (!snap.exists()) throw new Error('Orçamento não encontrado');
   const budget = formatDoc(toData(snap));
 
+  budget.client_id = budget.client_id ?? budget.clientId;
+  budget.vehicle_id = budget.vehicle_id ?? budget.vehicleId;
+  budget.valid_until = budget.valid_until ?? budget.validUntil;
+  budget.created_by_name = budget.created_by_name ?? budget.createdByName;
+  budget.created_at = budget.created_at ?? budget.createdAt;
+  budget.client_name = budget.client_name ?? budget.clientName;
+  budget.client_phone = budget.client_phone ?? budget.clientPhone;
+  budget.client_cpf_cnpj = budget.client_cpf_cnpj ?? budget.clientCpfCnpj;
+  budget.client_address = budget.client_address ?? budget.clientAddress;
+  budget.client_city = budget.client_city ?? budget.clientCity;
+  budget.client_state = budget.client_state ?? budget.clientState;
+  budget.make = budget.make ?? budget.vehicleMake;
+  budget.model = budget.model ?? budget.vehicleModel;
+  budget.plate = budget.plate ?? budget.vehiclePlate;
+  budget.year = budget.year ?? budget.vehicleYear;
+  budget.steering_type = budget.steering_type ?? budget.vehicleSteeringType;
+  budget.color = budget.color ?? budget.vehicleColor;
+
   const itemsSnap = await getDocs(collection(db, 'companies', COMPANY_ID, 'budgets', budgetId, 'items'));
-  budget.items = snapToList(itemsSnap).map(formatDoc);
+  budget.items = snapToList(itemsSnap).map(item => formatDoc({
+    ...item,
+    unit_price: item.unit_price ?? item.unitPrice ?? 0,
+  }));
 
   return budget;
 }
@@ -303,7 +408,7 @@ export async function createBudget(data, userId, userName) {
     description: i.description,
     type: i.type || 'servico',
     quantity: Number(i.quantity) || 1,
-    unitPrice: Number(i.unit_price ?? i.unitPrice) || 0,
+    unit_price: Number(i.unit_price ?? i.unitPrice) || 0,
     total: (Number(i.quantity) || 1) * (Number(i.unit_price ?? i.unitPrice) || 0),
   }));
   const subtotal = items.reduce((sum, i) => sum + i.total, 0);
@@ -314,32 +419,32 @@ export async function createBudget(data, userId, userName) {
 
   const budgetData = {
     code,
-    clientId,
-    vehicleId,
+    client_id: clientId,
+    vehicle_id: vehicleId,
     status: 'pendente',
     subtotal,
     discount,
     total,
     notes: data.notes || '',
-    validUntil: data.valid_until || data.validUntil || '',
-    createdBy: userId,
-    createdByName: userName || '',
-    approvedAt: null,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    valid_until: data.valid_until || data.validUntil || '',
+    created_by: userId,
+    created_by_name: userName || '',
+    approved_at: null,
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp(),
     // Denormalizados
-    clientName: client.name || '',
-    clientPhone: client.phone || '',
-    clientCpfCnpj: client.cpfCnpj || '',
-    clientAddress: client.address || '',
-    clientCity: client.city || '',
-    clientState: client.state || '',
-    vehicleMake: vehicle.make || '',
-    vehicleModel: vehicle.model || '',
-    vehiclePlate: vehicle.plate || '',
-    vehicleYear: vehicle.year || '',
-    vehicleSteeringType: vehicle.steeringType || '',
-    vehicleColor: vehicle.color || '',
+    client_name: client.name || '',
+    client_phone: client.phone || '',
+    client_cpf_cnpj: client.cpfCnpj || '',
+    client_address: client.address || '',
+    client_city: client.city || '',
+    client_state: client.state || '',
+    make: vehicle.make || '',
+    model: vehicle.model || '',
+    plate: vehicle.plate || '',
+    year: vehicle.year || '',
+    steering_type: vehicle.steeringType || '',
+    color: vehicle.color || '',
   };
 
   const budgetRef = await addDoc(col('budgets'), budgetData);
@@ -361,8 +466,8 @@ export async function updateBudgetStatus(budgetId, status) {
   const ref = docRef(`budgets/${budgetId}`);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('Orçamento não encontrado');
-  const updates = { status, updatedAt: serverTimestamp() };
-  if (status === 'aprovado') updates.approvedAt = serverTimestamp();
+  const updates = { status, updated_at: serverTimestamp() };
+  if (status === 'aprovado') updates.approved_at = serverTimestamp();
   await updateDoc(ref, updates);
   return { message: 'Status atualizado com sucesso' };
 }
@@ -383,7 +488,7 @@ export async function updateBudget(budgetId, data) {
       description: i.description,
       type: i.type || 'servico',
       quantity: Number(i.quantity) || 1,
-      unitPrice: Number(i.unit_price ?? i.unitPrice) || 0,
+      unit_price: Number(i.unit_price ?? i.unitPrice) || 0,
       total: (Number(i.quantity) || 1) * (Number(i.unit_price ?? i.unitPrice) || 0),
     }));
     for (const item of items) {
@@ -399,16 +504,19 @@ export async function updateBudget(budgetId, data) {
       discount,
       total: subtotal - discount,
       notes: data.notes ?? snap.data().notes,
-      validUntil: data.valid_until ?? data.validUntil ?? snap.data().validUntil,
-      updatedAt: serverTimestamp(),
+      valid_until: data.valid_until ?? data.validUntil ?? snap.data().valid_until,
+      updated_at: serverTimestamp(),
     });
   }
   return { message: 'Orçamento atualizado com sucesso' };
 }
 
 export async function deleteBudget(budgetId) {
-  const osSnap = await getDocs(query(col('serviceOrders'), where('budgetId', '==', budgetId), limit(1)));
-  if (!osSnap.empty) throw new Error('Não é possível excluir: orçamento vinculado a uma OS');
+  const [legacySnap, currentSnap] = await Promise.all([
+    getDocs(query(col('serviceOrders'), where('budgetId', '==', budgetId), limit(1))),
+    getDocs(query(col('serviceOrders'), where('budget_id', '==', budgetId), limit(1))),
+  ]);
+  if (!legacySnap.empty || !currentSnap.empty) throw new Error('Não é possível excluir: orçamento vinculado a uma OS');
   // Deletar itens + doc
   const itemsSnap = await getDocs(collection(db, 'companies', COMPANY_ID, 'budgets', budgetId, 'items'));
   const batch = writeBatch(db);
@@ -420,28 +528,36 @@ export async function deleteBudget(budgetId) {
 
 // ═══ SERVICE ORDERS ═══
 
-const STATUS_ORDER = { em_andamento: 1, aberta: 2, aguardando_peca: 3, concluida: 4, entregue: 5, cancelada: 6 };
-
 export async function getServiceOrders({ status, assignedTo, search = '', page = 1, limitCount = 50 } = {}) {
-  let constraints = [orderBy('createdAt', 'desc')];
-  if (status) constraints = [where('status', '==', status), ...constraints];
-  if (assignedTo) constraints = [where('assignedTo', '==', assignedTo), ...constraints];
+  // Sem orderBy quando há where (evita exigir índice)
+  let constraints = [];
+  if (status) constraints.push(where('status', '==', status));
 
   const q = query(col('serviceOrders'), ...constraints);
   const snap = await getDocs(q);
   let list = snapToList(snap).map(formatDoc);
 
+  if (assignedTo) {
+    list = list.filter(order => (order.assigned_to || order.assignedTo) === assignedTo);
+  }
+
   if (search) {
     const s = search.toLowerCase();
     list = list.filter(o =>
-      (o.clientName || '').toLowerCase().includes(s) ||
+      (o.client_name || o.clientName || '').toLowerCase().includes(s) ||
       (o.code || '').toLowerCase().includes(s) ||
-      (o.vehiclePlate || '').toLowerCase().includes(s)
+      (o.plate || o.vehiclePlate || '').toLowerCase().includes(s)
     );
   }
 
-  // Ordenar por prioridade de status
-  list.sort((a, b) => (STATUS_ORDER[a.status] || 99) - (STATUS_ORDER[b.status] || 99));
+  // Ordenar em JavaScript por status priority depois data
+  const STATUS_ORDER = { aberta: 0, em_andamento: 1, aguardando_peca: 2, concluida: 3, entregue: 4, cancelada: 5 };
+  list.sort((a, b) => {
+    const aOrder = STATUS_ORDER[a.status] ?? 99;
+    const bOrder = STATUS_ORDER[b.status] ?? 99;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt);
+  });
 
   const total = list.length;
   const start = (page - 1) * limitCount;
@@ -460,15 +576,39 @@ export async function getServiceOrder(orderId) {
 
   const [itemsSnap, logsSnap, photosSnap] = await Promise.all([
     getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'items')),
-    getDocs(query(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'logs'), orderBy('createdAt', 'desc'))),
-    getDocs(query(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'photos'), orderBy('createdAt', 'asc'))),
+    getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'logs')),
+    getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'photos')),
   ]);
 
   order.items = snapToList(itemsSnap).map(formatDoc);
-  order.logs = snapToList(logsSnap).map(formatDoc);
-  order.photos = snapToList(photosSnap).map(formatDoc);
+  const logs = snapToList(logsSnap).map(formatDoc);
+  const photos = snapToList(photosSnap).map(formatDoc);
+
+  // Ordenar em JavaScript (sem orderBy exigindo índice)
+  order.logs = logs.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  order.photos = photos.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
   return order;
+}
+
+export function watchServiceOrderChildren(orderId, onChange) {
+  if (import.meta.env.MODE === 'offline') return () => {};
+
+  const unsubscribe = ['items', 'logs', 'photos'].map(name => {
+    let initialSnapshot = true;
+    const path = collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, name);
+    return onSnapshot(path, () => {
+      if (initialSnapshot) {
+        initialSnapshot = false;
+        return;
+      }
+      onChange();
+    }, error => {
+      console.error(`Falha na sincronizacao em tempo real da OS (${name}):`, error);
+    });
+  });
+
+  return () => unsubscribe.forEach(stop => stop());
 }
 
 export async function createServiceOrder(data, userId, userName) {
@@ -501,28 +641,25 @@ export async function createServiceOrder(data, userId, userName) {
         description: i.description,
         type: i.type || 'servico',
         quantity: i.quantity || 1,
-        unitPrice: i.unitPrice || 0,
+        unit_price: i.unit_price ?? i.unitPrice ?? 0,
         total: i.total || 0,
         status: 'pendente',
       }));
-      // Marcar orçamento como aprovado
-      await updateDoc(docRef(`budgets/${budgetId}`), { status: 'aprovado', approvedAt: serverTimestamp(), updatedAt: serverTimestamp() });
     }
   } else if (data.items && data.items.length) {
     items = data.items.map(i => ({
       description: i.description,
       type: i.type || 'servico',
       quantity: Number(i.quantity) || 1,
-      unitPrice: Number(i.unit_price ?? i.unitPrice) || 0,
+      unit_price: Number(i.unit_price ?? i.unitPrice) || 0,
       total: (Number(i.quantity) || 1) * (Number(i.unit_price ?? i.unitPrice) || 0),
       status: 'pendente',
     }));
   }
 
-  // Buscar nome do técnico se atribuído
-  let assignedToName = '';
-  const assignedTo = data.assigned_to || data.assignedTo || null;
-  if (assignedTo) {
+  let assignedToName = data.assigned_to_name || data.assignedToName || '';
+  const assignedTo = data.assigned_to || data.assignedTo || assignedToName || null;
+  if (assignedTo && import.meta.env.MODE === 'offline') {
     const uSnap = await getDoc(docRef(`users/${assignedTo}`));
     if (uSnap.exists()) assignedToName = uSnap.data().name || '';
   }
@@ -531,63 +668,93 @@ export async function createServiceOrder(data, userId, userName) {
 
   const orderData = {
     code,
-    budgetId,
-    clientId,
-    vehicleId,
+    budget_id: budgetId,
+    client_id: clientId,
+    vehicle_id: vehicleId,
     status: 'aberta',
     priority: data.priority || 'normal',
-    assignedTo,
+    assigned_to: assignedTo,
     diagnosis: data.diagnosis || '',
-    servicesPerformed: '',
-    partsUsed: '',
+    services_performed: '',
+    parts_used: '',
     notes: data.notes || '',
-    kmEntry: data.km_entry || data.kmEntry || '',
-    kmExit: '',
-    estimatedCompletion: data.estimated_completion || data.estimatedCompletion || '',
-    startedAt: null,
-    completedAt: null,
-    deliveredAt: null,
-    createdBy: userId,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    km_entry: data.km_entry || data.kmEntry || '',
+    km_exit: '',
+    estimated_completion: data.estimated_completion || data.estimatedCompletion || '',
+    started_at: null,
+    completed_at: null,
+    delivered_at: null,
+    created_by: userId,
+    created_at: serverTimestamp(),
+    updated_at: serverTimestamp(),
     // Denormalizados
-    clientName: client.name || '',
-    clientPhone: client.phone || '',
-    clientCpfCnpj: client.cpfCnpj || '',
-    clientEmail: client.email || '',
-    clientAddress: client.address || '',
-    clientCity: client.city || '',
-    vehicleMake: vehicle.make || '',
-    vehicleModel: vehicle.model || '',
-    vehiclePlate: vehicle.plate || '',
-    vehicleYear: vehicle.year || '',
-    vehicleSteeringType: vehicle.steeringType || '',
-    vehicleColor: vehicle.color || '',
-    vehicleChassis: vehicle.chassis || '',
-    assignedToName,
-    createdByName: userName || '',
-    budgetCode,
-    budgetTotal,
+    client_name: client.name || '',
+    client_phone: client.phone || '',
+    client_cpf_cnpj: client.cpfCnpj || '',
+    client_email: client.email || '',
+    client_address: client.address || '',
+    client_city: client.city || '',
+    make: vehicle.make || '',
+    model: vehicle.model || '',
+    plate: vehicle.plate || '',
+    year: vehicle.year || '',
+    steering_type: vehicle.steeringType || '',
+    color: vehicle.color || '',
+    chassis: vehicle.chassis || '',
+    assigned_to_name: assignedToName,
+    created_by_name: userName || '',
+    budget_code: budgetCode,
+    budget_total: budgetTotal,
   };
 
-  const orderRef = await addDoc(col('serviceOrders'), orderData);
-
-  const batch = writeBatch(db);
-  // Itens
-  for (const item of items) {
-    const itemRef = doc(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderRef.id, 'items'));
-    batch.set(itemRef, item);
-  }
-  // Log de criação
+  const orderRef = doc(col('serviceOrders'));
+  const itemWrites = items.map(item => ({
+    ref: doc(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderRef.id, 'items')),
+    data: item,
+  }));
   const logRef = doc(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderRef.id, 'logs'));
-  batch.set(logRef, {
+  const logData = {
     userId,
     userName: userName || '',
     action: 'criacao',
     description: 'Ordem de serviço criada',
     createdAt: serverTimestamp(),
-  });
-  await batch.commit();
+  };
+
+  if (budgetId) {
+    const budgetRef = docRef(`budgets/${budgetId}`);
+    const [legacyOrderSnap, currentOrderSnap] = await Promise.all([
+      getDocs(query(col('serviceOrders'), where('budgetId', '==', budgetId), limit(1))),
+      getDocs(query(col('serviceOrders'), where('budget_id', '==', budgetId), limit(1))),
+    ]);
+    if (!legacyOrderSnap.empty || !currentOrderSnap.empty) {
+      throw new Error('Este orçamento já possui uma ordem de serviço');
+    }
+
+    await runTransaction(db, async transaction => {
+      const budgetSnap = await transaction.get(budgetRef);
+      if (!budgetSnap.exists()) throw new Error('Orçamento não encontrado');
+      if (budgetSnap.data().service_order_id || budgetSnap.data().serviceOrderId) {
+        throw new Error('Este orçamento já possui uma ordem de serviço');
+      }
+
+      transaction.set(orderRef, orderData);
+      itemWrites.forEach(item => transaction.set(item.ref, item.data));
+      transaction.set(logRef, logData);
+      transaction.update(budgetRef, {
+        status: 'aprovado',
+        approved_at: serverTimestamp(),
+        updated_at: serverTimestamp(),
+        service_order_id: orderRef.id,
+      });
+    });
+  } else {
+    const batch = writeBatch(db);
+    batch.set(orderRef, orderData);
+    itemWrites.forEach(item => batch.set(item.ref, item.data));
+    batch.set(logRef, logData);
+    await batch.commit();
+  }
 
   return { id: orderRef.id, code, message: 'Ordem de serviço criada com sucesso' };
 }
@@ -601,11 +768,11 @@ export async function updateOrderStatus(orderId, statusData, userId, userName) {
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('OS não encontrada');
 
-  const updates = { status, updatedAt: serverTimestamp() };
+  const updates = { status, updated_at: serverTimestamp() };
   const now = serverTimestamp();
-  if (status === 'em_andamento' && !snap.data().startedAt) updates.startedAt = now;
-  if (status === 'concluida' && !snap.data().completedAt) updates.completedAt = now;
-  if (status === 'entregue' && !snap.data().deliveredAt) updates.deliveredAt = now;
+  if (status === 'em_andamento' && !(snap.data().started_at || snap.data().startedAt)) updates.started_at = now;
+  if (status === 'concluida' && !(snap.data().completed_at || snap.data().completedAt)) updates.completed_at = now;
+  if (status === 'entregue' && !(snap.data().delivered_at || snap.data().deliveredAt)) updates.delivered_at = now;
 
   await updateDoc(ref, updates);
 
@@ -625,24 +792,29 @@ export async function updateServiceOrder(orderId, data, userId, userName) {
   if (!snap.exists()) throw new Error('OS não encontrada');
   const e = snap.data();
 
-  let assignedToName = e.assignedToName;
-  const assignedTo = data.assigned_to ?? data.assignedTo ?? e.assignedTo;
-  if (assignedTo && assignedTo !== e.assignedTo) {
+  let assignedToName = import.meta.env.MODE === 'offline'
+    ? e.assigned_to_name ?? e.assignedToName ?? ''
+    : data.assigned_to_name ?? data.assignedToName ?? e.assigned_to_name ?? e.assignedToName ?? '';
+  let assignedTo = data.assigned_to ?? data.assignedTo ?? e.assigned_to ?? e.assignedTo ?? null;
+  if (import.meta.env.MODE !== 'offline' && data.assigned_to_name !== undefined) {
+    assignedTo = assignedToName || null;
+  }
+  if (assignedTo && assignedTo !== (e.assigned_to ?? e.assignedTo) && import.meta.env.MODE === 'offline') {
     const uSnap = await getDoc(docRef(`users/${assignedTo}`));
     if (uSnap.exists()) assignedToName = uSnap.data().name || '';
   }
 
   await updateDoc(ref, clean({
-    assignedTo,
-    assignedToName,
+    assigned_to: assignedTo,
+    assigned_to_name: assignedToName,
     diagnosis: data.diagnosis ?? e.diagnosis,
-    servicesPerformed: data.services_performed ?? data.servicesPerformed ?? e.servicesPerformed,
-    partsUsed: data.parts_used ?? data.partsUsed ?? e.partsUsed,
+    services_performed: data.services_performed ?? data.servicesPerformed ?? e.services_performed ?? e.servicesPerformed,
+    parts_used: data.parts_used ?? data.partsUsed ?? e.parts_used ?? e.partsUsed,
     notes: data.notes ?? e.notes,
-    kmExit: data.km_exit ?? data.kmExit ?? e.kmExit,
-    estimatedCompletion: data.estimated_completion ?? data.estimatedCompletion ?? e.estimatedCompletion,
+    km_exit: data.km_exit ?? data.kmExit ?? e.km_exit ?? e.kmExit,
+    estimated_completion: data.estimated_completion ?? data.estimatedCompletion ?? e.estimated_completion ?? e.estimatedCompletion,
     priority: data.priority ?? e.priority,
-    updatedAt: serverTimestamp(),
+    updated_at: serverTimestamp(),
   }));
 
   // Substituir itens se fornecidos
@@ -656,7 +828,7 @@ export async function updateServiceOrder(orderId, data, userId, userName) {
         description: i.description,
         type: i.type || 'servico',
         quantity: Number(i.quantity) || 1,
-        unitPrice: Number(i.unit_price ?? i.unitPrice) || 0,
+        unit_price: Number(i.unit_price ?? i.unitPrice) || 0,
         total: (Number(i.quantity) || 1) * (Number(i.unit_price ?? i.unitPrice) || 0),
         status: i.status || 'pendente',
       });
@@ -752,25 +924,6 @@ export async function uploadCapturedPhoto(orderId, base64Image, { label, phase }
   return { id: photoRef.id, filename };
 }
 
-export async function deletePhoto(orderId, photoId, userId, userName) {
-  const photoRef = doc(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'photos', photoId);
-  const snap = await getDoc(photoRef);
-  if (!snap.exists()) throw new Error('Foto não encontrada');
-
-  const { storagePath } = snap.data();
-  await deletePhotoFromStorage(storagePath);
-  await deleteDoc(photoRef);
-
-  // Log
-  await addDoc(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'logs'), {
-    userId, userName: userName || '', action: 'foto',
-    description: 'Foto removida',
-    createdAt: serverTimestamp(),
-  });
-
-  return { message: 'Foto excluída com sucesso' };
-}
-
 // ── Funções de foto local (sem Storage) ──
 export async function addPhotoDoc(orderId, data) {
   const ref = await addDoc(
@@ -800,12 +953,12 @@ export async function getDashboard() {
 
   const osAberta = allOS.filter(o => ['aberta', 'em_andamento', 'aguardando_peca'].includes(o.status)).length;
   const osConcluida = allOS.filter(o => o.status === 'concluida').length;
-  const osEntregue = allOS.filter(o => o.status === 'entregue' && o.deliveredAt >= thirtyDaysAgo).length;
+  const osEntregue = allOS.filter(o => o.status === 'entregue' && (o.delivered_at || o.deliveredAt) >= thirtyDaysAgo).length;
   const orcPendente = allBudgets.filter(b => b.status === 'pendente').length;
 
   // Receita dos últimos 30 dias (somar itens de OS concluídas/entregues)
   const recentCompletedIds = allOS
-    .filter(o => ['concluida', 'entregue'].includes(o.status) && o.completedAt >= thirtyDaysAgo)
+    .filter(o => ['concluida', 'entregue'].includes(o.status) && (o.completed_at || o.completedAt) >= thirtyDaysAgo)
     .map(o => o.id);
 
   let revenue = 0;
@@ -815,8 +968,8 @@ export async function getDashboard() {
   }
 
   // Recentes
-  const recentOrders = allOS.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 10);
-  const recentBudgets = allBudgets.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, 10);
+  const recentOrders = allOS.sort((a, b) => (b.created_at || b.createdAt || '').localeCompare(a.created_at || a.createdAt || '')).slice(0, 10);
+  const recentBudgets = allBudgets.sort((a, b) => (b.created_at || b.createdAt || '').localeCompare(a.created_at || a.createdAt || '')).slice(0, 10);
 
   return {
     osAberta, osConcluida, osEntregue, orcPendente,
@@ -830,11 +983,13 @@ export async function getDashboard() {
 export async function getMonthlyReport(month, year) {
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 1);
-  const startTs = Timestamp.fromDate(startDate);
-  const endTs = Timestamp.fromDate(endDate);
-
-  const osSnap = await getDocs(query(col('serviceOrders'), where('createdAt', '>=', startTs), where('createdAt', '<', endTs), orderBy('createdAt', 'desc')));
-  const orders = snapToList(osSnap).map(formatDoc);
+  const osSnap = await getDocs(col('serviceOrders'));
+  const orders = snapToList(osSnap).map(formatDoc)
+    .filter(order => {
+      const createdAt = new Date(order.created_at || order.createdAt);
+      return createdAt >= startDate && createdAt < endDate;
+    })
+    .sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt));
 
   const totalOS = orders.length;
   const entregues = orders.filter(o => o.status === 'entregue').length;
@@ -851,7 +1006,7 @@ export async function getMonthlyReport(month, year) {
   // Por tipo de direção
   const steeringCounts = {};
   orders.forEach(o => {
-    const st = o.vehicleSteeringType || 'outro';
+    const st = o.steering_type || o.vehicleSteeringType || 'outro';
     steeringCounts[st] = (steeringCounts[st] || 0) + 1;
   });
   const bySteeringType = Object.entries(steeringCounts).map(([steering_type, count]) => ({ steering_type, count }));
@@ -878,11 +1033,13 @@ export async function getClientHistory(clientId) {
 }
 
 export async function getServicesReport(startDate, endDate) {
-  const startTs = Timestamp.fromDate(new Date(startDate));
-  const endTs = Timestamp.fromDate(new Date(endDate));
-
-  const osSnap = await getDocs(query(col('serviceOrders'), where('createdAt', '>=', startTs), where('createdAt', '<=', endTs)));
-  const orders = snapToList(osSnap).map(formatDoc);
+  const rangeStart = new Date(startDate);
+  const rangeEnd = new Date(endDate);
+  const osSnap = await getDocs(col('serviceOrders'));
+  const orders = snapToList(osSnap).map(formatDoc).filter(order => {
+    const createdAt = new Date(order.created_at || order.createdAt);
+    return createdAt >= rangeStart && createdAt <= rangeEnd;
+  });
 
   // Top serviços
   const serviceCounts = {};
@@ -899,8 +1056,8 @@ export async function getServicesReport(startDate, endDate) {
 
   // Por técnico
   const techCounts = {};
-  orders.filter(o => o.assignedTo).forEach(o => {
-    const name = o.assignedToName || 'Sem nome';
+  orders.filter(o => o.assigned_to || o.assignedTo).forEach(o => {
+    const name = o.assigned_to_name || o.assignedToName || 'Sem nome';
     if (!techCounts[name]) techCounts[name] = { name, total_os: 0, entregues: 0 };
     techCounts[name].total_os++;
     if (o.status === 'entregue') techCounts[name].entregues++;
@@ -933,7 +1090,6 @@ export async function getSettings() {
 
 export async function updateSettings(data) {
   const ref = doc(db, 'companies', COMPANY_ID);
-  const { setDoc } = await import('firebase/firestore');
   await setDoc(ref, {
     name: data.name || 'Moreira Direções',
     cnpj: data.cnpj || '',
@@ -965,7 +1121,6 @@ export async function getUser(userId) {
 
 export async function createUserDoc(userId, data) {
   const ref = doc(db, 'companies', COMPANY_ID, 'users', userId);
-  const { setDoc } = await import('firebase/firestore');
   await setDoc(ref, {
     username: data.username || data.email || '',
     name: data.name || '',

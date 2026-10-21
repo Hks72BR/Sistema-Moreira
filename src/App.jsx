@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import Clients from './pages/Clients';
 import ClientForm from './pages/ClientForm';
 import ClientDetail from './pages/ClientDetail';
+import LinkVehicle from './pages/LinkVehicle';
 import Budgets from './pages/Budgets';
 import BudgetForm from './pages/BudgetForm';
 import BudgetDetail from './pages/BudgetDetail';
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="clientes" element={<Clients />} />
         <Route path="clientes/novo" element={<ClientForm />} />
         <Route path="clientes/:id/editar" element={<ClientForm />} />
+        <Route path="clientes/:clientId/vincular-veiculo" element={<LinkVehicle />} />
         <Route path="clientes/:id" element={<ClientDetail />} />
         <Route path="orcamentos" element={<Budgets />} />
         <Route path="orcamentos/novo" element={<BudgetForm />} />
@@ -39,7 +41,10 @@ export default function App() {
         <Route path="ordens/nova" element={<ServiceOrderForm />} />
         <Route path="ordens/:id" element={<ServiceOrderDetail />} />
         <Route path="relatorios" element={<Reports />} />
-        <Route path="usuarios" element={<Users />} />
+        <Route
+          path="usuarios"
+          element={import.meta.env.MODE === 'offline' ? <Users /> : <Navigate to="/" replace />}
+        />
         <Route path="configuracoes" element={<Settings />} />
       </Route>
     </Routes>

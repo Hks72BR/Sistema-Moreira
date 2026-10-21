@@ -1,8 +1,11 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useState, useEffect } from 'react';
+import Icon from './Icon';
 
-const roleLabels = { admin: 'Administrador', gerente: 'Gerente', tecnico: 'Técnico', atendente: 'Atendente' };
+const roleLabels = import.meta.env.MODE === 'offline'
+  ? { admin: 'Administrador', gerente: 'Gerente', tecnico: 'Técnico', atendente: 'Atendente' }
+  : { admin: 'Equipe' };
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -10,6 +13,9 @@ export default function Layout() {
   const location = useLocation();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMoreMenu, setShowMoreMenu] = useState(false);
+  const canManageOfflineUsers = import.meta.env.MODE === 'offline' &&
+    (user?.role === 'admin' || user?.role === 'gerente');
+  const canManageSettings = import.meta.env.MODE !== 'offline' || canManageOfflineUsers;
 
   // Close menus on navigation
   useEffect(() => {
@@ -26,47 +32,48 @@ export default function Layout() {
 
   return (
     <div className="app-layout">
+      {import.meta.env.MODE === 'offline' && (
+        <div role="status" style={{ padding: '8px 16px', background: '#33280f', color: '#f5c76a', textAlign: 'center' }}>
+          Demonstracao offline — dados locais, sem sincronizacao. WhatsApp requer internet.
+        </div>
+      )}
       <header className="topbar">
         <div className="topbar-brand" onClick={() => navigate('/')}>
-          <img src="/logo.png" alt="Moreira" className="brand-logo" />
-          <div className="brand-text">
-            <h1>MOREIRA</h1>
-            <p>Direção &amp; Suspensão</p>
-          </div>
+          <img src="/logo.png" alt="Logo Moreira Direções" className="brand-logo" />
         </div>
 
         <nav className="topbar-nav">
           <NavLink to="/" end>
-            <span className="nav-icon">📊</span>
+            <Icon name="dashboard" className="nav-icon" />
             <span className="nav-label">Dashboard</span>
           </NavLink>
           <NavLink to="/clientes">
-            <span className="nav-icon">👥</span>
+            <Icon name="clients" className="nav-icon" />
             <span className="nav-label">Clientes</span>
           </NavLink>
           <NavLink to="/orcamentos">
-            <span className="nav-icon">📋</span>
+            <Icon name="clipboard" className="nav-icon" />
             <span className="nav-label">Orçamentos</span>
           </NavLink>
           <NavLink to="/ordens">
-            <span className="nav-icon">🔧</span>
+            <Icon name="wrench" className="nav-icon" />
             <span className="nav-label">Ordens de Serviço</span>
           </NavLink>
           <NavLink to="/relatorios">
-            <span className="nav-icon">📈</span>
+            <Icon name="reports" className="nav-icon" />
             <span className="nav-label">Relatórios</span>
           </NavLink>
-          {(user?.role === 'admin' || user?.role === 'gerente') && (
-            <>
-              <NavLink to="/usuarios">
-                <span className="nav-icon">👤</span>
-                <span className="nav-label">Usuários</span>
-              </NavLink>
-              <NavLink to="/configuracoes">
-                <span className="nav-icon">⚙️</span>
-                <span className="nav-label">Configurações</span>
-              </NavLink>
-            </>
+          {canManageOfflineUsers && (
+            <NavLink to="/usuarios">
+              <Icon name="user" className="nav-icon" />
+              <span className="nav-label">Usuários</span>
+            </NavLink>
+          )}
+          {canManageSettings && (
+            <NavLink to="/configuracoes">
+              <Icon name="settings" className="nav-icon" />
+              <span className="nav-label">Configurações</span>
+            </NavLink>
           )}
         </nav>
 
@@ -88,7 +95,8 @@ export default function Layout() {
               </div>
               <div className="dropdown-divider" />
               <button className="dropdown-item logout" onClick={handleLogout}>
-                🚪 Sair do Sistema
+                <Icon name="logout" />
+                Sair do Sistema
               </button>
             </div>
           )}
@@ -100,23 +108,23 @@ export default function Layout() {
       {/* Mobile Bottom Navigation */}
       <nav className="mobile-bottom-nav">
         <NavLink to="/" end>
-          <span className="nav-icon">📊</span>
+          <Icon name="dashboard" className="nav-icon" />
           Home
         </NavLink>
         <NavLink to="/clientes">
-          <span className="nav-icon">👥</span>
+          <Icon name="clients" className="nav-icon" />
           Clientes
         </NavLink>
         <NavLink to="/orcamentos">
-          <span className="nav-icon">📋</span>
+          <Icon name="clipboard" className="nav-icon" />
           Orçamentos
         </NavLink>
         <NavLink to="/ordens">
-          <span className="nav-icon">🔧</span>
+          <Icon name="wrench" className="nav-icon" />
           OS
         </NavLink>
-        <button className="mobile-menu-btn" onClick={() => setShowMoreMenu(!showMoreMenu)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px', fontSize: '10px', fontWeight: 500, padding: '4px 8px', cursor: 'pointer' }}>
-          <span className="nav-icon" style={{ fontSize: 20 }}>☰</span>
+        <button className="mobile-menu-btn" onClick={() => setShowMoreMenu(!showMoreMenu)}>
+          <Icon name="menu" className="nav-icon" />
           Mais
         </button>
       </nav>
@@ -125,14 +133,10 @@ export default function Layout() {
         <>
           <div className="mobile-more-backdrop" onClick={() => setShowMoreMenu(false)} />
           <div className="mobile-more-menu">
-            <NavLink to="/relatorios">📈 Relatórios</NavLink>
-            {(user?.role === 'admin' || user?.role === 'gerente') && (
-              <>
-                <NavLink to="/usuarios">👤 Usuários</NavLink>
-                <NavLink to="/configuracoes">⚙️ Configurações</NavLink>
-              </>
-            )}
-            <a href="#" onClick={(e) => { e.preventDefault(); handleLogout(); }}>🚪 Sair</a>
+            <NavLink to="/relatorios"><Icon name="reports" /> Relatórios</NavLink>
+            {canManageOfflineUsers && <NavLink to="/usuarios"><Icon name="user" /> Usuários</NavLink>}
+            {canManageSettings && <NavLink to="/configuracoes"><Icon name="settings" /> Configurações</NavLink>}
+            <a href="#" onClick={(e) => { e.preventDefault(); handleLogout(); }}><Icon name="logout" /> Sair</a>
           </div>
         </>
       )}

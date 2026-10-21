@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Reports() {
-  const { api } = useAuth();
+  const { api, dataVersion } = useAuth();
   const [reportType, setReportType] = useState('monthly');
   const [month, setMonth] = useState(new Date().getMonth() + 1);
   const [year, setYear] = useState(new Date().getFullYear());
@@ -61,6 +61,13 @@ export default function Reports() {
     else if (reportType === 'services') loadServicesReport();
     else if (reportType === 'client' && selectedClient) loadClientHistory(selectedClient.id);
   };
+
+  useEffect(() => {
+    if (!data) return;
+    if (reportType === 'monthly') loadMonthlyReport();
+    else if (reportType === 'services') loadServicesReport();
+    else if (reportType === 'client' && selectedClient) loadClientHistory(selectedClient.id);
+  }, [dataVersion]);
 
   const statusLabels = {
     aberta: 'Aberta', em_andamento: 'Em Andamento', aguardando_peca: 'Aguard. Peça',

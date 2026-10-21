@@ -1,116 +1,45 @@
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage } from './firebase';
-import { compressPhoto, compressBase64Photo } from './photoCompression';
 import * as cloudinaryStorage from './cloudinaryStorage';
+import { compressPhoto, compressBase64Photo } from './photoCompression';
 
-const STORAGE_AVAILABLE = !!storage;
-const USE_CLOUDINARY = !!import.meta.env.VITE_CLOUDINARY_CLOUD_NAME;
+function toDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('Não foi possível ler a foto local.'));
+    };
+    reader.onerror = () => reject(reader.error || new Error('Não foi possível ler a foto local.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadLocalPhoto(orderId, file, filename, alreadyCompressed = false) {
+  const compressed = alreadyCompressed ? file : await compressPhoto(file);
+  const name = filename || `os-${orderId}-${Date.now()}.jpg`;
+  return {
+    storagePath: `local/${orderId}/${name}`,
+    downloadUrl: await toDataUrl(compressed),
+    filename: name,
+  };
+}
 
 /**
- * Upload de foto com prioridade: Cloudinary > Firebase
+ * Upload de foto para armazenamento local no desenvolvimento e Cloudinary em produção.
  */
 export async function uploadPhotoFile(companyId, orderId, file, filename) {
-  // Tentar Cloudinary primeiro (V1 Testing)
-  if (USE_CLOUDINARY) {
-    try {
-      return await cloudinaryStorage.uploadPhotoFile(companyId, orderId, file, filename);
-    } catch (error) {
-      console.error('Cloudinary upload falhou, tentando Firebase:', error);
-    }
+  if (import.meta.env.DEV || import.meta.env.MODE === 'offline') {
+    return uploadLocalPhoto(orderId, file, filename);
   }
-
-  // Fallback: Firebase
-  if (!STORAGE_AVAILABLE) {
-    console.warn('Nenhum storage disponível (Cloudinary + Firebase desativados)');
-    return { storagePath: '', downloadUrl: '', filename: filename || `os-${orderId}-${Date.now()}.jpg` };
-  }
-
-  const compressed = await compressPhoto(file);
-  const ts = Date.now();
-  const name = filename || `os-${orderId}-${ts}.jpg`;
-  const storagePath = `companies/${companyId}/photos/${name}`;
-  const storageRef = ref(storage, storagePath);
-
-  await uploadBytes(storageRef, compressed, { contentType: 'image/jpeg' });
-  const downloadUrl = await getDownloadURL(storageRef);
-
-  return { storagePath, downloadUrl, filename: name };
+  return await cloudinaryStorage.uploadPhotoFile(companyId, orderId, file, filename);
 }
 
 /**
- * Upload de foto base64 com prioridade: Cloudinary > Firebase
+ * Upload de foto base64 para armazenamento local no desenvolvimento e Cloudinary em produção.
  */
 export async function uploadPhotoBase64(companyId, orderId, base64String) {
-  // Tentar Cloudinary primeiro (V1 Testing)
-  if (USE_CLOUDINARY) {
-    try {
-      return await cloudinaryStorage.uploadPhotoBase64(companyId, orderId, base64String);
-    } catch (error) {
-      console.error('Cloudinary upload falhou, tentando Firebase:', error);
-    }
+  if (import.meta.env.DEV || import.meta.env.MODE === 'offline') {
+    const compressed = await compressBase64Photo(base64String);
+    return uploadLocalPhoto(orderId, compressed, `os-${orderId}-${Date.now()}.jpg`, true);
   }
-
-  // Fallback: Firebase
-  if (!STORAGE_AVAILABLE) {
-    console.warn('Nenhum storage disponível (Cloudinary + Firebase desativados)');
-    return { storagePath: '', downloadUrl: '', filename: `os-${orderId}-${Date.now()}.jpg` };
-  }
-
-  const compressed = await compressBase64Photo(base64String);
-  const ts = Date.now();
-  const name = `os-${orderId}-${ts}.jpg`;
-  const storagePath = `companies/${companyId}/photos/${name}`;
-  const storageRef = ref(storage, storagePath);
-
-  await uploadBytes(storageRef, compressed, { contentType: 'image/jpeg' });
-  const downloadUrl = await getDownloadURL(storageRef);
-
-  return { storagePath, downloadUrl, filename: name };
-}
-
-/**
- * Deletar foto (Cloudinary + Firebase)
- */
-export async function deletePhotoFromStorage(storagePath) {
-  if (!storagePath) return;
-
-  // Tentar Cloudinary
-  if (USE_CLOUDINARY) {
-    try {
-      await cloudinaryStorage.deletePhotoFromStorage(storagePath);
-      return;
-    } catch (error) {
-      console.error('Cloudinary delete falhou:', error);
-    }
-  }
-
-  // Fallback: Firebase
-  if (STORAGE_AVAILABLE) {
-    const storageRef = ref(storage, storagePath);
-    await deleteObject(storageRef);
-  }
-}
-
-/**
- * Obter URL da foto (Cloudinary + Firebase)
- */
-export async function getPhotoURL(storagePath) {
-  if (!storagePath) return '';
-
-  // Tentar Cloudinary
-  if (USE_CLOUDINARY) {
-    try {
-      return await cloudinaryStorage.getPhotoURL(storagePath);
-    } catch (error) {
-      console.error('Cloudinary URL falhou:', error);
-    }
-  }
-
-  // Fallback: Firebase
-  if (STORAGE_AVAILABLE) {
-    const storageRef = ref(storage, storagePath);
-    return getDownloadURL(storageRef);
-  }
-
-  return '';
+  return await cloudinaryStorage.uploadPhotoBase64(companyId, orderId, base64String);
 }

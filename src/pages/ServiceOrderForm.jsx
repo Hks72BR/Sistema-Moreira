@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import WhatsappLink from '../components/WhatsappLink';
 
 export default function ServiceOrderForm() {
   const { api } = useAuth();
@@ -15,6 +16,7 @@ export default function ServiceOrderForm() {
   const [vehicleId, setVehicleId] = useState('');
   const [clientSearch, setClientSearch] = useState('');
   const [assignedTo, setAssignedTo] = useState('');
+  const [assignedToName, setAssignedToName] = useState('');
   const [diagnosis, setDiagnosis] = useState('');
   const [notes, setNotes] = useState('');
   const [priority, setPriority] = useState('normal');
@@ -25,7 +27,9 @@ export default function ServiceOrderForm() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    api('/users').then(u => setUsers(u.filter(x => x.active))).catch(() => {});
+    if (import.meta.env.MODE === 'offline') {
+      api('/users').then(u => setUsers(u.filter(x => x.active))).catch(() => {});
+    }
     if (preClientId) {
       loadVehicles(preClientId);
       api(`/clients/${preClientId}`).then(c => setClientSearch(c.name)).catch(() => {});
@@ -68,7 +72,10 @@ export default function ServiceOrderForm() {
       const result = await api('/service-orders', {
         method: 'POST',
         body: JSON.stringify({
-          client_id: clientId, vehicle_id: vehicleId, assigned_to: assignedTo || null,
+          client_id: clientId,
+          vehicle_id: vehicleId,
+          assigned_to: import.meta.env.MODE === 'offline' ? assignedTo || null : assignedToName.trim() || null,
+          assigned_to_name: import.meta.env.MODE === 'offline' ? undefined : assignedToName.trim(),
           diagnosis, notes, priority, km_entry: kmEntry, estimated_completion: estimatedCompletion || null,
           items: validItems.length > 0 ? validItems : undefined
         })
@@ -97,7 +104,7 @@ export default function ServiceOrderForm() {
                     <div key={c.id} onClick={() => selectClient(c)} style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid var(--border)', transition: 'background 0.2s' }}
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                      <strong>{c.name}</strong>{c.phone && <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>{c.phone}</span>}
+                      <strong>{c.name}</strong>{c.phone && <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}><WhatsappLink phone={c.phone} /></span>}
                     </div>
                   ))}
                 </div>
@@ -110,13 +117,20 @@ export default function ServiceOrderForm() {
                 {vehicles.map(v => <option key={v.id} value={v.id}>{v.make} {v.model} {v.year} {v.plate && `- ${v.plate}`} ({v.steering_type})</option>)}
               </select>
             </div>
-            <div className="form-group">
-              <label>Técnico Responsável</label>
-              <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)}>
-                <option value="">Selecione</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-            </div>
+            {import.meta.env.MODE === 'offline' ? (
+              <div className="form-group">
+                <label>Técnico Responsável</label>
+                <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)}>
+                  <option value="">Selecione</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div className="form-group">
+                <label>Responsável</label>
+                <input value={assignedToName} onChange={e => setAssignedToName(e.target.value)} maxLength={80} />
+              </div>
+            )}
             <div className="form-group">
               <label>Prioridade</label>
               <select value={priority} onChange={e => setPriority(e.target.value)}>

@@ -1,19 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { getWhatsappNumber, getWhatsappUrl } from '../components/WhatsappLink';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { LOGO_BASE64 } from '../logoBase64';
 
 export default function Settings() {
   const { api, user } = useAuth();
+  const canManageSettings = import.meta.env.MODE !== 'offline' ||
+    user?.role === 'admin' || user?.role === 'gerente';
   const [settings, setSettings] = useState({
     name: '', cnpj: '', ie: '', phone: '', email: '',
     address: '', neighborhood: '', city: '', state: 'SP', zip_code: ''
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
-
-  // Password change
   const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [pwMessage, setPwMessage] = useState('');
 
@@ -30,6 +31,10 @@ export default function Settings() {
 
   const handleSave = async (e) => {
     e.preventDefault();
+    if (settings.phone && !getWhatsappNumber(settings.phone)) {
+      setMessage('Erro: o WhatsApp da empresa deve conter DDD e um número válido (10 a 15 dígitos).');
+      return;
+    }
     setSaving(true);
     setMessage('');
     try {
@@ -50,7 +55,13 @@ export default function Settings() {
       return;
     }
     try {
-      await api('/auth/change-password', { method: 'PUT', body: JSON.stringify({ currentPassword: pwForm.currentPassword, newPassword: pwForm.newPassword }) });
+      await api('/auth/change-password', {
+        method: 'PUT',
+        body: JSON.stringify({
+          currentPassword: pwForm.currentPassword,
+          newPassword: pwForm.newPassword,
+        }),
+      });
       setPwMessage('Senha alterada com sucesso!');
       setPwForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
     } catch (err) {
@@ -81,7 +92,12 @@ export default function Settings() {
     doc.setFontSize(8);
     const addr = [settings.address, settings.city, settings.state].filter(Boolean).join(', ');
     if (addr) doc.text(addr, m + 37, 28);
-    if (settings.phone) doc.text(`Tel: ${settings.phone}`, m + 37, 33);
+    if (settings.phone) {
+      const companyPhoneText = `WhatsApp: ${settings.phone}`;
+      doc.text(companyPhoneText, m + 37, 33);
+      const companyPhoneUrl = getWhatsappUrl(settings.phone);
+      if (companyPhoneUrl) doc.link(m + 37, 30, doc.getTextWidth(companyPhoneText), 4, { url: companyPhoneUrl });
+    }
     doc.setTextColor(245, 166, 35);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12);
@@ -153,16 +169,16 @@ export default function Settings() {
     doc.text('Sistema de Gestão de Oficina', pageW / 2, y, { align: 'center' });
     y += 14;
 
-    // 1. PERFIS DE ACESSO
-    y = sectionTitle(doc, '1. Perfis de Acesso', y, pageW);
+    // 1. IDENTIFICAÇÃO E EQUIPE
+    y = sectionTitle(doc, '1. Acesso e Identificação da Equipe', y, pageW);
     doc.autoTable({
       startY: y, margin: { left: m, right: m },
-      head: [['Perfil', 'Acesso', 'Responsabilidades']],
+      head: [['Etapa / Função', 'Como Funciona', 'Responsabilidades']],
       body: [
-        ['Admin', 'Total', 'Configurações, usuários, relatórios, todas as operações'],
-        ['Gerente', 'Amplo', 'Aprovar orçamentos, supervisionar OS, relatórios'],
-        ['Técnico', 'Operacional', 'Criar/editar OS, registrar serviços, adicionar fotos'],
-        ['Atendente', 'Recepção', 'Cadastrar clientes, criar orçamentos, abrir OS'],
+        ['Acesso ao Sistema', 'Entrada por nome', 'Identificar o colaborador na sessão para histórico de orçamentos e OS'],
+        ['Sincronização', 'Tempo real', 'Clientes, veículos, orçamentos e OS atualizam automaticamente para a equipe'],
+        ['Recepção / Atendimento', 'Abertura e Cadastro', 'Cadastrar clientes/veículos, elaborar orçamentos e abrir OS'],
+        ['Execução Técnica', 'Oficina', 'Informar responsável na OS, registrar diagnóstico, logs e fotos de entrada/saída'],
       ],
       styles: { fontSize: 8, cellPadding: 3, textColor: [40, 40, 40] },
       headStyles: { fillColor: [10, 10, 15], textColor: [245, 166, 35], fontStyle: 'bold' },
@@ -177,9 +193,9 @@ export default function Settings() {
       ['2.1 Recepção', 'Verificar cadastro do cliente > Cadastrar cliente/veículo > Registrar queixa'],
       ['2.2 Orçamento', 'Novo Orçamento > Selecionar cliente/veículo > Listar serviços e peças > Definir validade'],
       ['2.3 Aprovação', 'Cliente aprova > Status "Aprovado" > Converter em OS | Recusa > Status "Recusado"'],
-      ['2.4 Abertura OS', 'Nova OS > Diagnóstico + KM entrada + Prioridade > Atribuir técnico > Fotos de entrada (mín. 4)'],
+      ['2.4 Abertura OS', 'Nova OS > Diagnóstico + KM entrada + Prioridade > Informar responsável > Fotos de entrada (mín. 4)'],
       ['2.5 Execução', 'Status "Em Andamento" > Registrar log > Se peça: "Aguardando Peça" > Detalhar serviços realizados'],
-      ['2.6 Conclusão', 'Status "Concluída" > KM saída > Fotos de saída (mín. 4) > Revisão do gerente'],
+      ['2.6 Conclusão', 'Status "Concluída" > KM saída > Fotos de saída (mín. 4) > Avisar cliente via WhatsApp'],
       ['2.7 Entrega', 'Status "Entregue" > Registrar data/hora > Cliente verifica'],
     ];
     doc.autoTable({
@@ -248,13 +264,13 @@ export default function Settings() {
     const boas = [
       'Sempre preencher todos os campos obrigatórios',
       'Sempre tirar fotos de entrada e saída do veículo',
-      'Sempre atribuir um técnico responsável à OS',
+      'Sempre informar o responsável na OS',
       'Nunca alterar dados de OS já entregues',
       'Sempre registrar observações importantes no log da OS',
       'Usar nomenclatura padronizada de serviços e peças',
       'Manter dados do cliente atualizados (telefone, e-mail)',
       'Verificar orçamentos pendentes diariamente',
-      'Fazer backup do banco de dados semanalmente',
+      'Conferir relatórios mensais de serviços e faturamento',
       'Registrar KM de entrada e saída em toda OS',
     ];
     boas.forEach((b, i) => { addText(`  ${i + 1}. ${b}`); });
@@ -263,191 +279,12 @@ export default function Settings() {
     doc.save('Plano_Padronizacao_Moreira.pdf');
   };
 
-  // ═══ PDF: Proposta Comercial ═══
-  const generateProposalPDF = () => {
-    const doc = new jsPDF('p', 'mm', 'a4');
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const m = 15;
-    let y = 10;
-
-    // ── Cover page ──
-    doc.setFillColor(10, 10, 15);
-    doc.rect(0, 0, pageW, pageH, 'F');
-
-    // Logo centered
-    try { doc.addImage(LOGO_BASE64, 'PNG', pageW / 2 - 35, 40, 70, 54); } catch {}
-
-    // Title
-    doc.setTextColor(245, 166, 35);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(28);
-    doc.text('SISTEMA DE GESTÃO', pageW / 2, 115, { align: 'center' });
-    doc.setFontSize(14);
-    doc.setTextColor(43, 127, 255);
-    doc.text('Oficina de Direção & Suspensão', pageW / 2, 125, { align: 'center' });
-
-    // Gold line
-    doc.setFillColor(245, 166, 35);
-    doc.rect(pageW / 2 - 40, 132, 80, 1, 'F');
-
-    doc.setFontSize(12);
-    doc.setTextColor(200, 200, 210);
-    doc.setFont('helvetica', 'normal');
-    doc.text('PROPOSTA COMERCIAL', pageW / 2, 142, { align: 'center' });
-
-    doc.setFontSize(10);
-    doc.setTextColor(140, 140, 150);
-    doc.text(`Versão 1.0 - ${new Date().toLocaleDateString('pt-BR')}`, pageW / 2, 155, { align: 'center' });
-
-    // Footer on cover
-    doc.setFontSize(8);
-    doc.setTextColor(100, 100, 110);
-    doc.text('Documento confidencial', pageW / 2, pageH - 15, { align: 'center' });
-
-    // ── Page 2: Features ──
-    doc.addPage();
-    y = pdfHeader(doc, 'PROPOSTA');
-
-    y = sectionTitle(doc, 'Sobre o Sistema', y, pageW);
-    doc.setFontSize(10);
-    doc.setTextColor(50, 50, 55);
-    doc.setFont('helvetica', 'normal');
-    const about = doc.splitTextToSize('Sistema completo de gestão desenvolvido exclusivamente para oficinas de direção e suspensão automotiva. Controle total de clientes, veículos, orçamentos, ordens de serviço, fotos, relatórios e muito mais - tudo em um único software instalado no seu computador.', pageW - m * 2);
-    doc.text(about, m, y);
-    y += about.length * 5 + 8;
-
-    y = sectionTitle(doc, 'Funcionalidades Incluídas', y, pageW);
-
-    const features = [
-      ['Gestão de Clientes', 'Cadastro completo com histórico de serviços, veículos e contatos'],
-      ['Gestão de Veículos', 'Cadastro com marca, modelo, ano, placa, tipo de direção e cor'],
-      ['Orçamentos', 'Criação, aprovação, recusa, conversão em OS, PDF para envio ao cliente'],
-      ['Ordens de Serviço', 'Fluxo completo: abertura > execução > conclusão > entrega'],
-      ['Fotos do Veículo', 'Registro fotográfico de entrada e saída com câmera ou upload'],
-      ['Atribuição de Técnicos', 'Cada OS atribuída a um técnico responsável'],
-      ['Relatórios', 'Faturamento, produtividade, serviços por tipo de direção'],
-      ['Multi-usuários', 'Até 8 usuários com 4 perfis de acesso (Admin, Gerente, Técnico, Atendente)'],
-      ['PDF Profissional', 'Orçamentos em PDF com logo da empresa para impressão ou WhatsApp'],
-      ['Tema Premium', 'Interface moderna dark com identidade visual da sua oficina'],
-      ['100% Local', 'Funciona sem internet, dados no seu computador com total privacidade'],
-      ['Manual de Uso', 'Plano de padronização completo incluso (PDF)'],
-    ];
-
-    doc.autoTable({
-      startY: y, margin: { left: m, right: m },
-      head: [['Funcionalidade', 'Descrição']],
-      body: features,
-      styles: { fontSize: 8, cellPadding: 4, textColor: [40, 40, 40] },
-      headStyles: { fillColor: [10, 10, 15], textColor: [245, 166, 35], fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248, 249, 252] },
-      columnStyles: { 0: { cellWidth: 45, fontStyle: 'bold' } },
-    });
-    y = doc.lastAutoTable.finalY + 10;
-
-    pdfFooter(doc, 2);
-
-    // ── Page 3: Pricing ──
-    doc.addPage();
-    y = pdfHeader(doc, 'INVESTIMENTO');
-
-    y = sectionTitle(doc, 'Planos Disponíveis', y, pageW);
-
-    // Plan 1: One-time purchase
-    doc.setFillColor(252, 249, 242);
-    doc.roundedRect(m, y, pageW - m * 2, 50, 3, 3, 'F');
-    doc.setFillColor(245, 166, 35);
-    doc.rect(m, y, 3, 50, 'F');
-
-    doc.setTextColor(180, 140, 40);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.text('LICENÇA VITALÍCIA', m + 10, y + 7);
-
-    doc.setTextColor(30, 30, 30);
-    doc.setFontSize(22);
-    doc.text('R$ 2.500,00', m + 10, y + 18);
-
-    doc.setTextColor(100, 100, 110);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Pagamento único - use para sempre', m + 10, y + 25);
-
-    const incl1 = ['- Instalação no computador da oficina', '- Configuração inicial com dados da empresa', '- Treinamento da equipe (presencial ou remoto)', '- Manual de padronização completo', '- 30 dias de suporte gratuito pós-instalação'];
-    incl1.forEach((t, i) => {
-      doc.setTextColor(50, 130, 50);
-      doc.setFontSize(8);
-      doc.text(t, m + 10, y + 32 + i * 4);
-    });
-
-    y += 58;
-
-    // Plan 2: Maintenance
-    doc.setFillColor(242, 248, 255);
-    doc.roundedRect(m, y, pageW - m * 2, 42, 3, 3, 'F');
-    doc.setFillColor(43, 127, 255);
-    doc.rect(m, y, 3, 42, 'F');
-
-    doc.setTextColor(43, 100, 200);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.text('MANUTENÇÃO & ATUALIZAÇÃO MENSAL', m + 10, y + 7);
-
-    doc.setTextColor(30, 30, 30);
-    doc.setFontSize(22);
-    doc.text('R$ 150,00', m + 10, y + 18);
-    doc.setFontSize(10);
-    doc.setTextColor(100, 100, 110);
-    doc.text('/mês', m + 68, y + 18);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Opcional - contrate quando precisar', m + 10, y + 25);
-
-    const incl2 = ['- Suporte técnico prioritário', '- Atualizações e melhorias do sistema', '- Backup assistido dos dados', '- Correção de problemas'];
-    incl2.forEach((t, i) => {
-      doc.setTextColor(30, 80, 180);
-      doc.setFontSize(8);
-      doc.text(t, m + 10, y + 32 + i * 4);
-    });
-
-    y += 52;
-
-    // Summary box
-    doc.setFillColor(10, 10, 15);
-    doc.roundedRect(m, y, pageW - m * 2, 24, 3, 3, 'F');
-    doc.setTextColor(245, 166, 35);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.text('RESUMO DO INVESTIMENTO', m + 10, y + 8);
-    doc.setTextColor(200, 200, 210);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text('Licença vitalícia: R$ 2.500,00 (pgto. único)  +  Manutenção: R$ 150,00/mês (opcional)', m + 10, y + 16);
-
-    y += 32;
-
-    // Contact
-    y = sectionTitle(doc, 'Contato', y, pageW);
-    doc.setFontSize(10);
-    doc.setTextColor(50, 50, 55);
-    doc.setFont('helvetica', 'normal');
-    if (settings.phone) doc.text(`Telefone/WhatsApp: ${settings.phone}`, m, y);
-    y += settings.phone ? 6 : 0;
-    if (settings.email) doc.text(`Email: ${settings.email}`, m, y);
-    y += settings.email ? 6 : 0;
-    if (settings.city) doc.text(`Localização: ${[settings.city, settings.state].filter(Boolean).join('/')}`, m, y);
-
-    pdfFooter(doc, 3);
-    doc.save('Proposta_Comercial_Moreira.pdf');
-  };
-
   return (
     <div>
       <div className="page-header"><h2>Configurações</h2></div>
 
       {/* Company Settings */}
-      {(user?.role === 'admin' || user?.role === 'gerente') && (
+      {canManageSettings && (
         <div className="card">
           <div className="card-header"><h3>Dados da Empresa</h3></div>
           {message && <div className={`alert ${message.startsWith('Erro') ? 'alert-error' : 'alert-success'}`}>{message}</div>}
@@ -456,7 +293,7 @@ export default function Settings() {
               <div className="form-group"><label>Nome da Empresa</label><input value={settings.name} onChange={e => setSettings({...settings, name: e.target.value})} /></div>
               <div className="form-group"><label>CNPJ</label><input value={settings.cnpj} onChange={e => setSettings({...settings, cnpj: e.target.value})} /></div>
               <div className="form-group"><label>Inscrição Estadual</label><input value={settings.ie} onChange={e => setSettings({...settings, ie: e.target.value})} /></div>
-              <div className="form-group"><label>Telefone</label><input value={settings.phone} onChange={e => setSettings({...settings, phone: e.target.value})} /></div>
+              <div className="form-group"><label>WhatsApp da Empresa</label><input type="tel" inputMode="tel" value={settings.phone} onChange={e => setSettings({...settings, phone: e.target.value})} placeholder="(00) 00000-0000" /></div>
               <div className="form-group"><label>Email</label><input value={settings.email} onChange={e => setSettings({...settings, email: e.target.value})} /></div>
               <div className="form-group" style={{ gridColumn: 'span 2' }}><label>Endereço</label><input value={settings.address} onChange={e => setSettings({...settings, address: e.target.value})} /></div>
               <div className="form-group"><label>Bairro</label><input value={settings.neighborhood} onChange={e => setSettings({...settings, neighborhood: e.target.value})} /></div>
@@ -471,41 +308,33 @@ export default function Settings() {
         </div>
       )}
 
-      {/* Change Password */}
-      <div className="card">
-        <div className="card-header"><h3>Alterar Minha Senha</h3></div>
-        {pwMessage && <div className={`alert ${pwMessage.startsWith('Erro') ? 'alert-error' : 'alert-success'}`}>{pwMessage}</div>}
-        <form onSubmit={handleChangePassword}>
-          <div className="form-grid">
-            <div className="form-group"><label>Senha Atual</label><input type="password" value={pwForm.currentPassword} onChange={e => setPwForm({...pwForm, currentPassword: e.target.value})} required /></div>
-            <div className="form-group"><label>Nova Senha</label><input type="password" value={pwForm.newPassword} onChange={e => setPwForm({...pwForm, newPassword: e.target.value})} required minLength={4} /></div>
-            <div className="form-group"><label>Confirmar Nova Senha</label><input type="password" value={pwForm.confirmPassword} onChange={e => setPwForm({...pwForm, confirmPassword: e.target.value})} required /></div>
-          </div>
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary">Alterar Senha</button>
-          </div>
-        </form>
-      </div>
+      {import.meta.env.MODE === 'offline' && canManageSettings && (
+        <div className="card">
+          <div className="card-header"><h3>Alterar Minha Senha</h3></div>
+          {pwMessage && <div className={`alert ${pwMessage.startsWith('Erro') ? 'alert-error' : 'alert-success'}`}>{pwMessage}</div>}
+          <form onSubmit={handleChangePassword}>
+            <div className="form-grid">
+              <div className="form-group"><label>Senha Atual</label><input type="password" value={pwForm.currentPassword} onChange={e => setPwForm({...pwForm, currentPassword: e.target.value})} required /></div>
+              <div className="form-group"><label>Nova Senha</label><input type="password" value={pwForm.newPassword} onChange={e => setPwForm({...pwForm, newPassword: e.target.value})} required minLength={4} /></div>
+              <div className="form-group"><label>Confirmar Nova Senha</label><input type="password" value={pwForm.confirmPassword} onChange={e => setPwForm({...pwForm, confirmPassword: e.target.value})} required /></div>
+            </div>
+            <div className="form-actions">
+              <button type="submit" className="btn btn-primary">Alterar Senha</button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Documents */}
-      {(user?.role === 'admin' || user?.role === 'gerente') && (
+      {canManageSettings && (
         <div className="card">
           <div className="card-header"><h3>📄 Documentos</h3></div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            <div style={{ padding: 20, background: 'var(--bg-surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-              <h4 style={{ color: 'var(--gold)', marginBottom: 8, fontSize: 14 }}>📋 Manual de Padronização</h4>
-              <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
-                Plano completo de uso do sistema: perfis de acesso, fluxo de atendimento, categorias de serviço, regras de fotos e boas práticas.
-              </p>
-              <button className="btn btn-primary" onClick={generatePlanPDF} style={{ width: '100%', justifyContent: 'center' }}>📥 Baixar PDF do Manual</button>
-            </div>
-            <div style={{ padding: 20, background: 'var(--bg-surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-              <h4 style={{ color: 'var(--gold)', marginBottom: 8, fontSize: 14 }}>💼 Proposta Comercial</h4>
-              <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
-                Documento de venda com funcionalidades, planos e preços para apresentar a clientes interessados no sistema.
-              </p>
-              <button className="btn btn-success" onClick={generateProposalPDF} style={{ width: '100%', justifyContent: 'center' }}>📥 Baixar Proposta Comercial</button>
-            </div>
+          <div style={{ padding: 20, background: 'var(--bg-surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+            <h4 style={{ color: 'var(--gold)', marginBottom: 8, fontSize: 14 }}>Manual de Padronização</h4>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
+              Plano completo de uso do sistema: identificação da equipe, fluxo de atendimento, categorias de serviço, regras de fotos e boas práticas.
+            </p>
+            <button className="btn btn-primary" onClick={generatePlanPDF}>📥 Baixar PDF do Manual</button>
           </div>
         </div>
       )}

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import Icon from '../components/Icon';
 
 const statusLabels = { pendente: 'Pendente', aprovado: 'Aprovado', recusado: 'Recusado', expirado: 'Expirado' };
 
 export default function Budgets() {
-  const { api } = useAuth();
+  const { api, dataVersion } = useAuth();
   const [budgets, setBudgets] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -26,7 +27,7 @@ export default function Budgets() {
     }
   };
 
-  useEffect(() => { loadBudgets(); }, [statusFilter]);
+  useEffect(() => { loadBudgets(); }, [statusFilter, dataVersion]);
 
   const formatCurrency = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 
@@ -59,7 +60,7 @@ export default function Budgets() {
           <div className="loading">Carregando...</div>
         ) : budgets.length === 0 ? (
           <div className="empty-state">
-            <div className="icon">📋</div>
+            <div className="icon"><Icon name="clipboard" size={34} /></div>
             <h3>Nenhum orçamento encontrado</h3>
           </div>
         ) : (

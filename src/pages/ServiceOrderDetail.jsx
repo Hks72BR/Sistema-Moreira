@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import Icon from '../components/Icon';
+import WhatsappLink, { getWhatsappUrl } from '../components/WhatsappLink';
 import { compressPhoto, compressBase64Photo } from '../lib/photoCompression';
 import * as firestoreApi from '../lib/firestore';
 import * as storage from '../lib/storage';
@@ -22,11 +24,15 @@ const statusFlow = {
 
 export default function ServiceOrderDetail() {
   const { id } = useParams();
-  const { api, user } = useAuth();
+  const { api, user, dataVersion } = useAuth();
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [logText, setLogText] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [completionSaving, setCompletionSaving] = useState(false);
+  const [completionError, setCompletionError] = useState('');
+  const [completionNotice, setCompletionNotice] = useState(null);
   const [editForm, setEditForm] = useState({});
   const [users, setUsers] = useState([]);
   const [photos, setPhotos] = useState([]);
@@ -65,19 +71,86 @@ export default function ServiceOrderDetail() {
   useEffect(() => {
     loadOrder();
     loadPhotos();
-    api('/users').then(u => setUsers(u.filter(x => x.active))).catch(() => {});
+  }, [id, dataVersion]);
+
+  useEffect(() => {
+    if (import.meta.env.MODE === 'offline') {
+      api('/users').then(u => setUsers(u.filter(x => x.active))).catch(() => {});
+    }
+    return firestoreApi.watchServiceOrderChildren(id, () => {
+      loadOrder();
+      loadPhotos();
+    });
   }, [id]);
 
   const formatCurrency = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
   const formatDate = (d) => d ? new Date(d).toLocaleString('pt-BR') : '-';
 
   const changeStatus = async (status) => {
+    if (status === 'concluida') {
+      setCompletionError('');
+      setCompletionNotice(null);
+      setShowCompletionModal(true);
+      return;
+    }
     const statusNames = { em_andamento: 'Iniciar Serviço', concluida: 'Concluir', entregue: 'Registrar Entrega', cancelada: 'Cancelar', aguardando_peca: 'Aguardar Peça' };
     if (!confirm(`${statusNames[status] || 'Alterar status'}?`)) return;
     try {
       await api(`/service-orders/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
       loadOrder();
     } catch (err) { alert(err.message); }
+  };
+
+  const completeOrder = async (notifyClient) => {
+    if (completionSaving) return;
+    const vehicleName = [order.make, order.model].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+    const clientFirstName = order.client_name?.trim().split(/\s+/)[0];
+    const serviceDescriptions = order.items?.map(item => item.description?.trim()).filter(Boolean) || [];
+    const servicesText = order.services_performed?.trim()
+      || (serviceDescriptions.length ? serviceDescriptions.map(description => `• ${description}`).join('\n') : '');
+    const messageParts = [
+      `Olá${clientFirstName ? `, *${clientFirstName}*` : ''}! 👋`,
+      'Temos uma ótima notícia: o serviço do seu veículo foi concluído com sucesso.',
+      `*ORDEM DE SERVIÇO*\n${order.code}`,
+      [vehicleName && `*VEÍCULO*\n${vehicleName}`, order.plate && `Placa: ${order.plate.trim().toUpperCase()}`].filter(Boolean).join('\n'),
+      servicesText && `*SERVIÇOS REALIZADOS*\n${servicesText}`,
+      'Agradecemos por escolher a *Moreira Direções*.\nConte conosco sempre que precisar. 🤝'
+    ].filter(Boolean);
+    const whatsappUrl = notifyClient ? getWhatsappUrl(order.client_phone, messageParts.join('\n')) : '';
+    const whatsappWindow = notifyClient && whatsappUrl ? window.open('about:blank', '_blank') : null;
+    if (whatsappWindow) whatsappWindow.opener = null;
+
+    setCompletionSaving(true);
+    setCompletionError('');
+    try {
+      await api(`/service-orders/${id}/status`, { method: 'PUT', body: JSON.stringify({ status: 'concluida' }) });
+      setShowCompletionModal(false);
+      loadOrder();
+      if (!notifyClient) {
+        setCompletionNotice({
+          title: 'OS concluída',
+          message: 'Lembre-se de entrar em contato com o cliente para avisar que o serviço foi finalizado.'
+        });
+      } else if (!whatsappUrl) {
+        setCompletionNotice({
+          title: 'OS concluída',
+          message: 'Não há um número de WhatsApp válido cadastrado para este cliente. Será necessário entrar em contato por outro meio.'
+        });
+      } else if (whatsappWindow) {
+        whatsappWindow.location.href = whatsappUrl;
+      } else {
+        setCompletionNotice({
+          title: 'OS concluída',
+          message: 'O navegador bloqueou a abertura automática. Use o link abaixo para abrir o WhatsApp.',
+          whatsappUrl
+        });
+      }
+    } catch (err) {
+      whatsappWindow?.close();
+      setCompletionError(`Não foi possível concluir a OS: ${err.message}`);
+    } finally {
+      setCompletionSaving(false);
+    }
   };
 
   const addLog = async () => {
@@ -92,6 +165,7 @@ export default function ServiceOrderDetail() {
   const openEdit = () => {
     setEditForm({
       assigned_to: order.assigned_to || '',
+      assigned_to_name: order.assigned_to_name || order.assignedToName || '',
       diagnosis: order.diagnosis || '',
       services_performed: order.services_performed || '',
       parts_used: order.parts_used || '',
@@ -121,16 +195,8 @@ export default function ServiceOrderDetail() {
         const ts = Date.now();
         const fileName = `os-${id}-${ts}-${i}.jpg`;
         
-        // Upload para Cloudinary (ou Firebase como fallback)
-        let downloadUrl = '';
-        let storagePath = '';
-        try {
-          const result = await storage.uploadPhotoFile(order?.companyId || 'moreira-direcoes', id, file, fileName);
-          downloadUrl = result.downloadUrl;
-          storagePath = result.storagePath;
-        } catch (uploadErr) {
-          console.warn('Upload para cloud falhou:', uploadErr);
-        }
+        // Upload para Cloudinary
+        const { downloadUrl, storagePath } = await storage.uploadPhotoFile('moreira', id, file, fileName);
 
         // Salvar localmente também (Electron)
         if (downloadUrl) {
@@ -195,16 +261,8 @@ export default function ServiceOrderDetail() {
       const ts = Date.now();
       const fileName = `os-${id}-${ts}.jpg`;
       
-      // Upload para Cloudinary (ou Firebase como fallback)
-      let downloadUrl = '';
-      let storagePath = '';
-      try {
-        const result = await storage.uploadPhotoBase64(order?.companyId || 'moreira-direcoes', id, dataUrl);
-        downloadUrl = result.downloadUrl;
-        storagePath = result.storagePath;
-      } catch (uploadErr) {
-        console.warn('Upload para cloud falhou:', uploadErr);
-      }
+      // Upload para Cloudinary
+      const { downloadUrl, storagePath } = await storage.uploadPhotoBase64('moreira', id, dataUrl);
 
       // Salvar localmente também (Electron)
       if (window.electronAPI) {
@@ -261,17 +319,18 @@ export default function ServiceOrderDetail() {
           </span>
           {order.priority !== 'normal' && (
             <span className={`badge badge-${order.priority}`} style={{ marginLeft: 8, verticalAlign: 'middle' }}>
-              {order.priority === 'urgente' ? '🔴 Urgente' : '🟡 Alta'}
+              {order.priority === 'urgente' ? 'Urgente' : 'Alta'}
             </span>
           )}
         </h2>
         <div className="actions">
           {nextStatuses.map(s => (
             <button key={s} className={`btn ${s === 'cancelada' ? 'btn-danger' : s === 'entregue' ? 'btn-success' : 'btn-primary'}`} onClick={() => changeStatus(s)}>
-              {s === 'em_andamento' ? '▶ Iniciar' : s === 'concluida' ? '✅ Concluir' : s === 'entregue' ? '📦 Entregar' : s === 'aguardando_peca' ? '⏳ Aguard. Peça' : '❌ Cancelar'}
+              <Icon name={s === 'em_andamento' ? 'play' : s === 'concluida' ? 'check' : s === 'entregue' ? 'package' : s === 'aguardando_peca' ? 'clock' : 'close'} />
+              {s === 'em_andamento' ? 'Iniciar' : s === 'concluida' ? 'Concluir' : s === 'entregue' ? 'Entregar' : s === 'aguardando_peca' ? 'Aguard. Peça' : 'Cancelar'}
             </button>
           ))}
-          <button className="btn btn-outline" onClick={openEdit}>✏️ Editar</button>
+          <button className="btn btn-outline" onClick={openEdit}><Icon name="edit" /> Editar</button>
         </div>
       </div>
 
@@ -282,11 +341,11 @@ export default function ServiceOrderDetail() {
             <div className="card-header"><h3>Informações da OS</h3></div>
             <div className="detail-info">
               <div className="info-row"><span className="info-label">Cliente:</span><span className="info-value"><Link to={`/clientes/${order.client_id}`}>{order.client_name}</Link></span></div>
-              <div className="info-row"><span className="info-label">Telefone:</span><span className="info-value">{order.client_phone || '-'}</span></div>
-              <div className="info-row"><span className="info-label">Veículo:</span><span className="info-value">{order.make} {order.model} {order.vehicle_year} {order.color && `(${order.color})`}</span></div>
+              <div className="info-row"><span className="info-label">WhatsApp:</span><span className="info-value"><WhatsappLink phone={order.client_phone} /></span></div>
+              <div className="info-row"><span className="info-label">Veículo:</span><span className="info-value">{order.make} {order.model} {order.year} {order.color && `(${order.color})`}</span></div>
               <div className="info-row"><span className="info-label">Placa:</span><span className="info-value">{order.plate || '-'}</span></div>
               <div className="info-row"><span className="info-label">Direção:</span><span className="info-value">{steeringLabels[order.steering_type] || order.steering_type}</span></div>
-              <div className="info-row"><span className="info-label">Técnico:</span><span className="info-value">{order.assigned_name || 'Não atribuído'}</span></div>
+              <div className="info-row"><span className="info-label">Responsável:</span><span className="info-value">{order.assigned_to_name || order.assigned_name || 'Não atribuído'}</span></div>
               <div className="info-row"><span className="info-label">Criado por:</span><span className="info-value">{order.created_by_name}</span></div>
               <div className="info-row"><span className="info-label">KM Entrada:</span><span className="info-value">{order.km_entry || '-'}</span></div>
               {order.km_exit && <div className="info-row"><span className="info-label">KM Saída:</span><span className="info-value">{order.km_exit}</span></div>}
@@ -344,17 +403,17 @@ export default function ServiceOrderDetail() {
           {/* Photos Section */}
           <div className="card">
             <div className="card-header">
-              <h3>📸 Fotos do Veículo</h3>
+              <h3><Icon name="camera" /> Fotos do Veículo</h3>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <select value={photoPhase} onChange={e => setPhotoPhase(e.target.value)} style={{ width: 'auto', padding: '6px 32px 6px 10px', fontSize: 13 }}>
                   <option value="entrada">Entrada</option>
                   <option value="saida">Saída</option>
                 </select>
                 <button className="btn btn-outline btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingPhoto}>
-                  📁 Arquivo
+                  <Icon name="upload" /> Arquivo
                 </button>
                 <button className="btn btn-warning btn-sm" onClick={openCamera} disabled={uploadingPhoto}>
-                  📷 Câmera
+                  <Icon name="camera" /> Câmera
                 </button>
                 <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={handleFileUpload} />
               </div>
@@ -363,7 +422,7 @@ export default function ServiceOrderDetail() {
             
             {photos.length === 0 ? (
               <div className="empty-state" style={{ padding: 30 }}>
-                <div className="icon">📷</div>
+                <div className="icon"><Icon name="camera" size={34} /></div>
                 <p>Nenhuma foto registrada</p>
                 <p style={{ fontSize: 12, marginTop: 4 }}>Tire fotos do veículo antes de iniciar o serviço</p>
               </div>
@@ -372,7 +431,7 @@ export default function ServiceOrderDetail() {
                 {/* Entrada photos */}
                 {photos.filter(p => p.phase === 'entrada').length > 0 && (
                   <div className="photos-section">
-                    <h3 style={{ color: 'var(--info)' }}>🔵 Fotos de Entrada</h3>
+                    <h3 style={{ color: 'var(--info)' }}>Fotos de Entrada</h3>
                     <div className="photos-grid">
                       {photos.filter(p => p.phase === 'entrada').map(photo => (
                         <div key={photo.id} className="photo-card" onClick={() => setLightboxPhoto(photo)}>
@@ -444,18 +503,65 @@ export default function ServiceOrderDetail() {
         </div>
       </div>
 
+      {showCompletionModal && (
+        <div className="modal-overlay" onClick={() => { if (!completionSaving) setShowCompletionModal(false); }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="completion-title" onClick={e => e.stopPropagation()}>
+            <h3 id="completion-title">Finalizar OS {order.code}</h3>
+            <p>Deseja informar ao cliente <strong>{order.client_name}</strong> que o serviço foi finalizado?</p>
+            <p style={{ color: 'var(--text-secondary)' }}>Ao escolher Sim, o WhatsApp será aberto com uma mensagem pronta para revisar e enviar.</p>
+            {completionError && <div className="alert alert-error">{completionError}</div>}
+            <div className="form-actions">
+              <button className="btn btn-outline" onClick={() => completeOrder(false)} disabled={completionSaving}>
+                {completionSaving ? 'Finalizando...' : 'Não, avisarei depois'}
+              </button>
+              <button className="btn btn-primary" onClick={() => completeOrder(true)} disabled={completionSaving}>
+                {completionSaving ? 'Finalizando...' : 'Sim, avisar pelo WhatsApp'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {completionNotice && (
+        <div className="modal-overlay" onClick={() => setCompletionNotice(null)}>
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="completion-notice-title" onClick={e => e.stopPropagation()}>
+            <h3 id="completion-notice-title">{completionNotice.title}</h3>
+            <p>{completionNotice.message}</p>
+            {completionNotice.whatsappUrl && (
+              <a className="btn btn-primary" href={completionNotice.whatsappUrl} target="_blank" rel="noopener noreferrer">
+                Abrir WhatsApp
+              </a>
+            )}
+            <div className="form-actions">
+              <button className="btn btn-outline" onClick={() => setCompletionNotice(null)}>Fechar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Edit Modal */}
       {showEditModal && (
         <div className="modal-overlay" onClick={() => setShowEditModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3>Editar OS {order.code}</h3>
-            <div className="form-group">
-              <label>Técnico Responsável</label>
-              <select value={editForm.assigned_to} onChange={e => setEditForm({...editForm, assigned_to: e.target.value})}>
-                <option value="">Selecione</option>
-                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-            </div>
+            {import.meta.env.MODE === 'offline' ? (
+              <div className="form-group">
+                <label>Técnico Responsável</label>
+                <select value={editForm.assigned_to} onChange={e => setEditForm({...editForm, assigned_to: e.target.value})}>
+                  <option value="">Selecione</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div className="form-group">
+                <label>Responsável</label>
+                <input
+                  value={editForm.assigned_to_name || ''}
+                  onChange={e => setEditForm({ ...editForm, assigned_to_name: e.target.value })}
+                  maxLength={80}
+                />
+              </div>
+            )}
             <div className="form-group">
               <label>Prioridade</label>
               <select value={editForm.priority} onChange={e => setEditForm({...editForm, priority: e.target.value})}>
@@ -501,11 +607,11 @@ export default function ServiceOrderDetail() {
       {showCamera && (
         <div className="modal-overlay" onClick={closeCamera}>
           <div className="modal camera-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 700 }}>
-            <h3>📷 Capturar Foto ({photoPhase === 'entrada' ? 'Entrada' : 'Saída'})</h3>
+            <h3><Icon name="camera" /> Capturar Foto ({photoPhase === 'entrada' ? 'Entrada' : 'Saída'})</h3>
             <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', borderRadius: 10, background: '#000' }} />
             <div className="camera-controls">
               <button className="btn btn-outline" onClick={closeCamera}>Cancelar</button>
-              <button className="btn-capture" onClick={capturePhoto}>📸</button>
+              <button className="btn-capture" onClick={capturePhoto} aria-label="Capturar foto"><Icon name="camera" size={26} /></button>
             </div>
           </div>
         </div>

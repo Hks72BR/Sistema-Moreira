@@ -4,9 +4,14 @@
   "description": "Sistema de Gestão - Moreira Direções",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "vite",
-    "dev:electron": "concurrently \"vite\" \"npx wait-on http://localhost:5173 && electron .\"",
+    "dev": "concurrently --kill-others \"firebase emulators:start --only auth,firestore --project demo-moreira\" \"wait-on tcp:127.0.0.1:9099 tcp:127.0.0.1:8080 && node scripts/seed-emulator-admin.cjs && vite --host 127.0.0.1\"",
+    "predev:lan": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-lan-pwa.ps1",
+    "dev:lan": "concurrently --kill-others-on-fail \"firebase emulators:start --only auth,firestore --project demo-moreira --config firebase.lan.json\" \"wait-on tcp:127.0.0.1:9099 tcp:127.0.0.1:8080 && node scripts/seed-emulator-admin.cjs\" \"node scripts/https-emulator-proxy.cjs\" \"vite --config vite.lan.config.js --mode lan --host 0.0.0.0\"",
+    "dev:electron": "concurrently --kill-others \"firebase emulators:start --only auth,firestore --project demo-moreira\" \"wait-on tcp:127.0.0.1:9099 tcp:127.0.0.1:8080 && node scripts/seed-emulator-admin.cjs && vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
     "build": "vite build",
+    "build:offline": "vite build --config vite.offline.config.js --mode offline",
+    "test:offline": "npm run build:offline && node scripts/test-offline.cjs",
+    "make:offline": "npm run build:offline && electron-builder --config electron.offline.cjs --win nsis --publish never",
     "build:electron": "vite build && electron-builder --win portable",
     "make": "npm run build && electron-builder --win",
     "make:publish": "npm run build && electron-builder --win --publish always",
@@ -15,12 +20,10 @@
   },
   "dependencies": {
     "browser-image-compression": "^2.0.2",
-    "cloudinary": "^2.10.0",
     "electron-updater": "^6.8.9",
     "firebase": "^12.13.0",
     "jspdf": "^2.5.2",
-    "jspdf-autotable": "^3.8.4",
-    "next-cloudinary": "^6.18.8"
+    "jspdf-autotable": "^3.8.4"
   },
   "devDependencies": {
     "@types/react": "^18.3.0",
@@ -29,6 +32,7 @@
     "concurrently": "^9.0.0",
     "electron": "^42.2.0",
     "electron-builder": "^26.8.1",
+    "firebase-admin": "^14.5.0",
     "firebase-tools": "^15.27.0",
     "png-to-ico": "^3.0.1",
     "react": "^18.3.0",
@@ -65,8 +69,8 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "Hks72BR",
-      "repo": "Sistema-Moreira"
+      "owner": "moreiradire-max",
+      "repo": "Moreira-app"
     }
   }
 }

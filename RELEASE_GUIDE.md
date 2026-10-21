@@ -54,7 +54,7 @@ Isso vai:
 
 ### Passo 4: Verificar no GitHub
 
-Acesse: https://github.com/Hks72BR/Sistema-Moreira/releases
+Acesse: https://github.com/moreiradire-max/Moreira-app/releases
 
 Você verá:
 - ✅ Novo release (v1.0.1)
@@ -72,8 +72,8 @@ O arquivo `package.json` contém:
   "build": {
     "publish": {
       "provider": "github",
-      "owner": "Hks72BR",
-      "repo": "Sistema-Moreira"
+      "owner": "moreiradire-max",
+      "repo": "Moreira-app"
     }
   }
 }
@@ -146,4 +146,3 @@ npm run make:publish
 2. **Usuários precisam ter a versão anterior instalada** para que o auto-update funcione
 3. **O arquivo `latest.yml` é criado automaticamente** pelo electron-builder
 4. **Recomendado**: Use versionamento semântico (1.0.0, 1.0.1, 1.1.0, etc.)
-

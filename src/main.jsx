@@ -15,9 +15,15 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   </React.StrictMode>
 );
 
-// Register PWA service worker
-if ('serviceWorker' in navigator) {
+if (
+  'serviceWorker' in navigator &&
+  import.meta.env.MODE !== 'offline' &&
+  (import.meta.env.PROD || import.meta.env.MODE === 'lan')
+) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
+    const serviceWorker = import.meta.env.PROD ? '/sw.js' : '/sw-dev.js';
+    navigator.serviceWorker.register(serviceWorker).catch((error) => {
+      console.error('Service worker registration failed:', error);
+    });
   });
 }

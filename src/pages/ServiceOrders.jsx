@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import Icon from '../components/Icon';
 
 const statusLabels = {
   aberta: 'Aberta', em_andamento: 'Em Andamento', aguardando_peca: 'Aguard. Peça',
@@ -8,7 +9,7 @@ const statusLabels = {
 };
 
 export default function ServiceOrders() {
-  const { api } = useAuth();
+  const { api, dataVersion } = useAuth();
   const [orders, setOrders] = useState([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -29,7 +30,7 @@ export default function ServiceOrders() {
     }
   };
 
-  useEffect(() => { loadOrders(); }, [statusFilter]);
+  useEffect(() => { loadOrders(); }, [statusFilter, dataVersion]);
 
   return (
     <div>
@@ -63,7 +64,7 @@ export default function ServiceOrders() {
           <div className="loading">Carregando...</div>
         ) : orders.length === 0 ? (
           <div className="empty-state">
-            <div className="icon">🔧</div>
+            <div className="icon"><Icon name="wrench" size={34} /></div>
             <h3>Nenhuma OS encontrada</h3>
           </div>
         ) : (

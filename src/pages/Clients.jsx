@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import Icon from '../components/Icon';
+import WhatsappLink from '../components/WhatsappLink';
 
 export default function Clients() {
-  const { api } = useAuth();
+  const { api, dataVersion } = useAuth();
   const [clients, setClients] = useState([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -20,7 +22,7 @@ export default function Clients() {
     }
   };
 
-  useEffect(() => { loadClients(); }, []);
+  useEffect(() => { loadClients(search); }, [dataVersion]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -38,7 +40,7 @@ export default function Clients() {
         <form onSubmit={handleSearch} className="search-bar">
           <input
             type="text"
-            placeholder="Buscar por nome, CPF/CNPJ, telefone ou email..."
+            placeholder="Buscar por nome, CPF/CNPJ, WhatsApp ou email..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -54,7 +56,7 @@ export default function Clients() {
           <div className="loading">Carregando...</div>
         ) : clients.length === 0 ? (
           <div className="empty-state">
-            <div className="icon">👥</div>
+            <div className="icon"><Icon name="clients" size={34} /></div>
             <h3>Nenhum cliente encontrado</h3>
             <p>Cadastre o primeiro cliente para começar.</p>
           </div>
@@ -65,7 +67,7 @@ export default function Clients() {
                 <tr>
                   <th>Nome</th>
                   <th>CPF/CNPJ</th>
-                  <th>Telefone</th>
+                  <th>WhatsApp</th>
                   <th>Email</th>
                   <th>Cidade</th>
                   <th>Ações</th>
@@ -76,7 +78,7 @@ export default function Clients() {
                   <tr key={c.id}>
                     <td><Link to={`/clientes/${c.id}`} style={{ fontWeight: 500 }}>{c.name}</Link></td>
                     <td>{c.cpf_cnpj || '-'}</td>
-                    <td>{c.phone || '-'}</td>
+                    <td><WhatsappLink phone={c.phone} /></td>
                     <td>{c.email || '-'}</td>
                     <td>{c.city || '-'}</td>
                     <td>

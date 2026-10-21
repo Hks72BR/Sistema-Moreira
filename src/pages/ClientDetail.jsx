@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import WhatsappLink from '../components/WhatsappLink';
 
 const steeringLabels = { hidraulica: 'Hidráulica', eletrica: 'Elétrica', eletrohidraulica: 'Eletro-hidráulica', mecanica: 'Mecânica' };
 const statusLabels = {
@@ -11,7 +12,7 @@ const statusLabels = {
 
 export default function ClientDetail() {
   const { id } = useParams();
-  const { api } = useAuth();
+  const { api, dataVersion } = useAuth();
   const navigate = useNavigate();
   const [client, setClient] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -25,7 +26,7 @@ export default function ClientDetail() {
     api(`/clients/${id}`).then(data => { setClient(data); setLoading(false); }).catch(err => { setError(err.message); setLoading(false); });
   };
 
-  useEffect(() => { loadClient(); }, [id]);
+  useEffect(() => { loadClient(); }, [id, dataVersion]);
 
   const handleAddVehicle = async (e) => {
     e.preventDefault();
@@ -75,7 +76,8 @@ export default function ClientDetail() {
             <div className="detail-info">
               <div className="info-row"><span className="info-label">Tipo:</span><span className="info-value">{client.type === 'pj' ? 'Pessoa Jurídica' : 'Pessoa Física'}</span></div>
               <div className="info-row"><span className="info-label">{client.type === 'pj' ? 'CNPJ' : 'CPF'}:</span><span className="info-value">{client.cpf_cnpj || '-'}</span></div>
-              <div className="info-row"><span className="info-label">Telefone:</span><span className="info-value">{client.phone || '-'} {client.phone2 && `/ ${client.phone2}`}</span></div>
+              <div className="info-row"><span className="info-label">WhatsApp:</span><span className="info-value"><WhatsappLink phone={client.phone} /></span></div>
+              {client.phone2 && <div className="info-row"><span className="info-label">WhatsApp alternativo:</span><span className="info-value"><WhatsappLink phone={client.phone2} /></span></div>}
               <div className="info-row"><span className="info-label">Email:</span><span className="info-value">{client.email || '-'}</span></div>
               <div className="info-row"><span className="info-label">Endereço:</span><span className="info-value">{[client.address, client.neighborhood, client.city, client.state].filter(Boolean).join(', ') || '-'}</span></div>
               {client.notes && <div className="info-row"><span className="info-label">Observações:</span><span className="info-value">{client.notes}</span></div>}

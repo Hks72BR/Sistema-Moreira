@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import Icon from '../components/Icon';
 
 const statusLabels = {
   aberta: 'Aberta', em_andamento: 'Em Andamento', aguardando_peca: 'Aguard. Peça',
@@ -9,13 +10,13 @@ const statusLabels = {
 };
 
 export default function Dashboard() {
-  const { api } = useAuth();
+  const { api, dataVersion } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api('/reports/dashboard').then(setData).catch(console.error).finally(() => setLoading(false));
-  }, []);
+  }, [dataVersion]);
 
   if (loading) return <div className="loading">Carregando dashboard...</div>;
   if (!data) return <div className="loading">Erro ao carregar dados</div>;
@@ -34,32 +35,32 @@ export default function Dashboard() {
 
       <div className="stats-grid">
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(43,127,255,0.12)', color: '#60A5FA' }}>🔧</div>
+          <div className="stat-icon stat-icon-blue"><Icon name="wrench" /></div>
           <div className="stat-value">{data.osAberta}</div>
           <div className="stat-label">OS em Aberto</div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(0,214,143,0.12)', color: '#00D68F' }}>✅</div>
+          <div className="stat-icon stat-icon-green"><Icon name="check" /></div>
           <div className="stat-value">{data.osConcluida}</div>
           <div className="stat-label">OS Concluídas</div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(245,166,35,0.12)', color: '#F5A623' }}>📋</div>
+          <div className="stat-icon stat-icon-gold"><Icon name="clipboard" /></div>
           <div className="stat-value">{data.orcPendente}</div>
           <div className="stat-label">Orçamentos Pendentes</div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(0,214,143,0.12)', color: '#00D68F' }}>💰</div>
+          <div className="stat-icon stat-icon-green"><Icon name="coins" /></div>
           <div className="stat-value">{formatCurrency(data.revenue)}</div>
           <div className="stat-label">Faturamento (30 dias)</div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(245,166,35,0.12)', color: '#F5A623' }}>👥</div>
+          <div className="stat-icon stat-icon-gold"><Icon name="clients" /></div>
           <div className="stat-value">{data.totalClients}</div>
           <div className="stat-label">Total de Clientes</div>
         </div>
         <div className="stat-card">
-          <div className="stat-icon" style={{ background: 'rgba(43,127,255,0.12)', color: '#60A5FA' }}>📦</div>
+          <div className="stat-icon stat-icon-blue"><Icon name="package" /></div>
           <div className="stat-value">{data.osEntregue}</div>
           <div className="stat-label">Entregas (30 dias)</div>
         </div>

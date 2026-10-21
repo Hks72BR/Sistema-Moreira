@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import WhatsappLink from '../components/WhatsappLink';
 
 export default function BudgetForm() {
   const { api } = useAuth();
@@ -114,7 +115,7 @@ export default function BudgetForm() {
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-card-hover)'}
                       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                       <strong>{c.name}</strong>
-                      {c.phone && <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>{c.phone}</span>}
+                      {c.phone && <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}><WhatsappLink phone={c.phone} /></span>}
                     </div>
                   ))}
                 </div>

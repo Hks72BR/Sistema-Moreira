@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { getWhatsappNumber } from '../components/WhatsappLink';
 
 const states = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
 
@@ -19,15 +20,23 @@ export default function ClientForm() {
 
   useEffect(() => {
     if (isEditing) {
-      api(`/clients/${id}`).then(data => {
-        setForm({
-          name: data.name || '', type: data.type || 'pf', cpf_cnpj: data.cpf_cnpj || '',
-          phone: data.phone || '', phone2: data.phone2 || '', email: data.email || '',
-          address: data.address || '', neighborhood: data.neighborhood || '',
-          city: data.city || '', state: data.state || 'SP', zip_code: data.zip_code || '',
-          notes: data.notes || ''
-        });
-      }).catch(err => setError(err.message));
+      // Use a route that loads only basic client data (not related data that requires indexes)
+      const loadClient = async () => {
+        try {
+          // Call a special endpoint that only fetches basic client info
+          const data = await api(`/clients/${id}?basic=true`);
+          setForm({
+            name: data.name || '', type: data.type || 'pf', cpf_cnpj: data.cpf_cnpj || data.cpfCnpj || '',
+            phone: data.phone || '', phone2: data.phone2 || '', email: data.email || '',
+            address: data.address || '', neighborhood: data.neighborhood || '',
+            city: data.city || '', state: data.state || 'SP', zip_code: data.zip_code || data.zipCode || '',
+            notes: data.notes || ''
+          });
+        } catch (err) {
+          setError(err.message);
+        }
+      };
+      loadClient();
     }
   }, [id]);
 
@@ -38,16 +47,24 @@ export default function ClientForm() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    if (form.phone && !getWhatsappNumber(form.phone)) {
+      setError('O WhatsApp principal deve conter DDD e um número válido (10 a 15 dígitos).');
+      return;
+    }
+    if (form.phone2 && !getWhatsappNumber(form.phone2)) {
+      setError('O WhatsApp alternativo deve conter DDD e um número válido (10 a 15 dígitos).');
+      return;
+    }
     setSaving(true);
     try {
       if (isEditing) {
         await api(`/clients/${id}`, { method: 'PUT', body: JSON.stringify(form) });
+        navigate(`/clientes/${id}`);
       } else {
         const result = await api('/clients', { method: 'POST', body: JSON.stringify(form) });
-        navigate(`/clientes/${result.id}`);
-        return;
+        // Redirect to link vehicle page after creating client
+        navigate(`/clientes/${result.id}/vincular-veiculo`);
       }
-      navigate(`/clientes/${id}`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -81,12 +98,12 @@ export default function ClientForm() {
               <input name="cpf_cnpj" value={form.cpf_cnpj} onChange={handleChange} placeholder={form.type === 'pj' ? '00.000.000/0000-00' : '000.000.000-00'} />
             </div>
             <div className="form-group">
-              <label>Telefone</label>
-              <input name="phone" value={form.phone} onChange={handleChange} placeholder="(00) 00000-0000" />
+              <label>WhatsApp principal</label>
+              <input name="phone" type="tel" inputMode="tel" value={form.phone} onChange={handleChange} placeholder="(00) 00000-0000" />
             </div>
             <div className="form-group">
-              <label>Telefone 2</label>
-              <input name="phone2" value={form.phone2} onChange={handleChange} />
+              <label>WhatsApp alternativo</label>
+              <input name="phone2" type="tel" inputMode="tel" value={form.phone2} onChange={handleChange} placeholder="(00) 00000-0000" />
             </div>
             <div className="form-group">
               <label>Email</label>

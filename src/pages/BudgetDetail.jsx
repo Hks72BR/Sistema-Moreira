@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import Icon from '../components/Icon';
+import WhatsappLink, { getWhatsappUrl } from '../components/WhatsappLink';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { LOGO_BASE64 } from '../logoBase64';
@@ -10,16 +12,17 @@ const steeringLabels = { hidraulica: 'Hidráulica', eletrica: 'Elétrica', eletr
 
 export default function BudgetDetail() {
   const { id } = useParams();
-  const { api } = useAuth();
+  const { api, dataVersion } = useAuth();
   const navigate = useNavigate();
   const [budget, setBudget] = useState(null);
   const [loading, setLoading] = useState(true);
   const [company, setCompany] = useState({});
+  const [creatingOS, setCreatingOS] = useState(false);
 
   useEffect(() => {
     api(`/budgets/${id}`).then(data => { setBudget(data); setLoading(false); }).catch(() => setLoading(false));
     api('/settings').then(data => setCompany(data)).catch(() => {});
-  }, [id]);
+  }, [id, dataVersion]);
 
   const formatCurrency = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
 
@@ -63,10 +66,17 @@ export default function BudgetDetail() {
     doc.setFontSize(8);
     doc.setTextColor(160, 160, 170);
     const companyLine1 = [company.address, company.neighborhood, company.city, company.state].filter(Boolean).join(', ');
-    const companyLine2 = [company.phone && `Tel: ${company.phone}`, company.email].filter(Boolean).join('  |  ');
+    const companyLine2 = [company.phone && `WhatsApp: ${company.phone}`, company.email].filter(Boolean).join('  |  ');
     const companyLine3 = company.cnpj ? `CNPJ: ${company.cnpj}` : '';
     if (companyLine1) doc.text(companyLine1, textX, 30);
-    if (companyLine2) doc.text(companyLine2, textX, 35);
+    if (companyLine2) {
+      doc.text(companyLine2, textX, 35);
+      const companyPhoneUrl = getWhatsappUrl(company.phone);
+      if (companyPhoneUrl) {
+        const companyPhoneText = `WhatsApp: ${company.phone}`;
+        doc.link(textX, 32, doc.getTextWidth(companyPhoneText), 4, { url: companyPhoneUrl });
+      }
+    }
     if (companyLine3) doc.text(companyLine3, textX, 40);
 
     // Budget code on the right side of header
@@ -133,7 +143,10 @@ export default function BudgetDetail() {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(70, 70, 80);
-    doc.text(`Tel: ${budget.client_phone || '-'}`, margin + 8, y + 19);
+    const clientPhoneText = `WhatsApp: ${budget.client_phone || '-'}`;
+    doc.text(clientPhoneText, margin + 8, y + 19);
+    const clientPhoneUrl = getWhatsappUrl(budget.client_phone);
+    if (clientPhoneUrl) doc.link(margin + 8, y + 15, doc.getTextWidth(clientPhoneText), 5, { url: clientPhoneUrl });
     if (budget.client_cpf_cnpj) {
       doc.text(`CPF/CNPJ: ${budget.client_cpf_cnpj}`, margin + 8, y + 25);
     }
@@ -153,7 +166,7 @@ export default function BudgetDetail() {
     doc.setTextColor(30, 30, 30);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
-    doc.text(`${budget.make || ''} ${budget.model || ''} ${budget.vehicle_year || ''}`.trim() || '-', vehX + 8, y + 12);
+    doc.text(`${budget.make || ''} ${budget.model || ''} ${budget.year || ''}`.trim() || '-', vehX + 8, y + 12);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
@@ -299,6 +312,8 @@ export default function BudgetDetail() {
   };
 
   const createOS = async () => {
+    if (creatingOS) return;
+    setCreatingOS(true);
     try {
       const result = await api('/service-orders', {
         method: 'POST',
@@ -307,6 +322,8 @@ export default function BudgetDetail() {
       navigate(`/ordens/${result.id}`);
     } catch (err) {
       alert(err.message);
+    } finally {
+      setCreatingOS(false);
     }
   };
 
@@ -328,15 +345,17 @@ export default function BudgetDetail() {
       <div className="page-header">
         <h2>Orçamento {budget.code}</h2>
         <div className="actions">
-          <button className="btn btn-primary" onClick={generatePDF}>📄 Baixar PDF</button>
+          <button className="btn btn-primary" onClick={generatePDF}><Icon name="file" /> Baixar PDF</button>
           {budget.status === 'pendente' && (
             <>
-              <button className="btn btn-success" onClick={() => updateStatus('aprovado')}>✅ Aprovar</button>
-              <button className="btn btn-danger" onClick={() => updateStatus('recusado')}>❌ Recusar</button>
+              <button className="btn btn-success" onClick={() => updateStatus('aprovado')}><Icon name="check" /> Aprovar</button>
+              <button className="btn btn-danger" onClick={() => updateStatus('recusado')}><Icon name="close" /> Recusar</button>
             </>
           )}
           {budget.status === 'aprovado' && (
-            <button className="btn btn-primary" onClick={createOS}>🔧 Gerar OS</button>
+            <button className="btn btn-primary" onClick={createOS} disabled={creatingOS}>
+              {creatingOS ? 'Gerando OS...' : <><Icon name="wrench" /> Gerar OS</>}
+            </button>
           )}
           {budget.status === 'pendente' && (
             <button className="btn btn-danger btn-sm" onClick={handleDelete}>Excluir</button>
@@ -353,8 +372,8 @@ export default function BudgetDetail() {
             </div>
             <div className="detail-info">
               <div className="info-row"><span className="info-label">Cliente:</span><span className="info-value"><Link to={`/clientes/${budget.client_id}`}>{budget.client_name}</Link></span></div>
-              <div className="info-row"><span className="info-label">Telefone:</span><span className="info-value">{budget.client_phone || '-'}</span></div>
-              <div className="info-row"><span className="info-label">Veículo:</span><span className="info-value">{budget.make} {budget.model} {budget.vehicle_year} {budget.color && `(${budget.color})`}</span></div>
+              <div className="info-row"><span className="info-label">WhatsApp:</span><span className="info-value"><WhatsappLink phone={budget.client_phone} /></span></div>
+              <div className="info-row"><span className="info-label">Veículo:</span><span className="info-value">{budget.make} {budget.model} {budget.year} {budget.color && `(${budget.color})`}</span></div>
               <div className="info-row"><span className="info-label">Placa:</span><span className="info-value">{budget.plate || '-'}</span></div>
               <div className="info-row"><span className="info-label">Direção:</span><span className="info-value">{steeringLabels[budget.steering_type] || budget.steering_type}</span></div>
               <div className="info-row"><span className="info-label">Criado por:</span><span className="info-value">{budget.created_by_name}</span></div>
@@ -394,10 +413,12 @@ export default function BudgetDetail() {
           <div className="card">
             <h3 style={{ marginBottom: 12 }}>Ações Rápidas</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button className="btn btn-primary" onClick={generatePDF} style={{ justifyContent: 'center' }}>📄 Baixar PDF / Imprimir</button>
-              <Link to={`/clientes/${budget.client_id}`} className="btn btn-outline" style={{ justifyContent: 'center' }}>👤 Ver Cliente</Link>
+              <button className="btn btn-primary" onClick={generatePDF} style={{ justifyContent: 'center' }}><Icon name="file" /> Baixar PDF / Imprimir</button>
+              <Link to={`/clientes/${budget.client_id}`} className="btn btn-outline" style={{ justifyContent: 'center' }}><Icon name="user" /> Ver Cliente</Link>
               {budget.status === 'aprovado' && (
-                <button className="btn btn-success" onClick={createOS} style={{ justifyContent: 'center' }}>🔧 Gerar Ordem de Serviço</button>
+                <button className="btn btn-success" onClick={createOS} disabled={creatingOS} style={{ justifyContent: 'center' }}>
+                  {creatingOS ? 'Gerando OS...' : <><Icon name="wrench" /> Gerar Ordem de Serviço</>}
+                </button>
               )}
             </div>
           </div>
