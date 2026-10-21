@@ -21,7 +21,11 @@ export default function Dashboard() {
   if (loading) return <div className="loading">Carregando dashboard...</div>;
   if (!data) return <div className="loading">Erro ao carregar dados</div>;
 
-  const formatCurrency = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+  const formatVehicle = (item) => {
+    const info = item.vehicleInfo || [item.make || item.vehicleMake, item.model || item.vehicleModel].filter(Boolean).join(' ');
+    const plate = item.vehiclePlate || item.plate;
+    return [info, plate].filter(Boolean).join(' - ') || '-';
+  };
 
   return (
     <div>
@@ -48,11 +52,6 @@ export default function Dashboard() {
           <div className="stat-icon stat-icon-gold"><Icon name="clipboard" /></div>
           <div className="stat-value">{data.orcPendente}</div>
           <div className="stat-label">Orçamentos Pendentes</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon stat-icon-green"><Icon name="coins" /></div>
-          <div className="stat-value">{formatCurrency(data.revenue)}</div>
-          <div className="stat-label">Faturamento (30 dias)</div>
         </div>
         <div className="stat-card">
           <div className="stat-icon stat-icon-gold"><Icon name="clients" /></div>
@@ -87,7 +86,7 @@ export default function Dashboard() {
                   <tr key={order.id}>
                     <td><Link to={`/ordens/${order.id}`}>{order.code}</Link></td>
                     <td>{order.clientName || order.client_name}</td>
-                    <td>{order.vehicleInfo} {order.vehiclePlate && `- ${order.vehiclePlate}`}</td>
+                    <td>{formatVehicle(order)}</td>
                     <td><span className={`badge badge-${order.status}`}>{statusLabels[order.status]}</span></td>
                   </tr>
                 ))}
@@ -107,7 +106,7 @@ export default function Dashboard() {
                 <tr>
                   <th>Código</th>
                   <th>Cliente</th>
-                  <th>Total</th>
+                  <th>Veículo</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -116,7 +115,7 @@ export default function Dashboard() {
                   <tr key={b.id}>
                     <td><Link to={`/orcamentos/${b.id}`}>{b.code}</Link></td>
                     <td>{b.clientName || b.client_name}</td>
-                    <td>{formatCurrency(b.total)}</td>
+                    <td>{formatVehicle(b)}</td>
                     <td><span className={`badge badge-${b.status}`}>{statusLabels[b.status]}</span></td>
                   </tr>
                 ))}
