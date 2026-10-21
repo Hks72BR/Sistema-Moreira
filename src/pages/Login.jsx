@@ -46,11 +46,6 @@ export default function Login() {
       <div className="login-card">
         <img src="/logo.png" alt="Moreira Direções" className="login-logo" />
         <p className="subtitle">Sistema de Gestão</p>
-        {import.meta.env.MODE !== 'offline' && (
-          <p className="subtitle">
-            Informe seu nome para identificar seus atendimentos e registros no sistema.
-          </p>
-        )}
         {import.meta.env.MODE === 'offline' && (
           <p role="status">Demonstracao offline — dados somente neste computador, sem sincronizacao.</p>
         )}

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'moreira-v1';
+const CACHE_NAME = 'moreira-v2';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',
@@ -33,10 +33,16 @@ self.addEventListener('fetch', (event) => {
   if (url.hostname.includes('googleapis.com') || url.hostname.includes('firebaseio.com')) return;
   if (url.hostname.includes('firestore.googleapis.com')) return;
 
-  // For navigation requests, serve index.html (SPA)
+  // For navigation requests, serve fresh index.html (SPA) and update cache
   if (event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('/'))
+      fetch(event.request, { cache: 'no-cache' })
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put('/', clone));
+          return response;
+        })
+        .catch(() => caches.match('/'))
     );
     return;
   }
