@@ -1,4 +1,4 @@
-const CACHE_NAME = 'moreira-v2';
+const CACHE_NAME = 'moreira-v3';
 const STATIC_ASSETS = [
   '/',
   '/manifest.json',

@@ -59,9 +59,9 @@ export default function Layout() {
             <Icon name="wrench" className="nav-icon" />
             <span className="nav-label">Ordens de Serviço</span>
           </NavLink>
-          <NavLink to="/relatorios">
-            <Icon name="reports" className="nav-icon" />
-            <span className="nav-label">Relatórios</span>
+          <NavLink to="/financeiro">
+            <Icon name="coins" className="nav-icon" />
+            <span className="nav-label">Financeiro</span>
           </NavLink>
           {canManageOfflineUsers && (
             <NavLink to="/usuarios">
@@ -133,7 +133,7 @@ export default function Layout() {
         <>
           <div className="mobile-more-backdrop" onClick={() => setShowMoreMenu(false)} />
           <div className="mobile-more-menu">
-            <NavLink to="/relatorios"><Icon name="reports" /> Relatórios</NavLink>
+            <NavLink to="/financeiro"><Icon name="coins" /> Financeiro</NavLink>
             {canManageOfflineUsers && <NavLink to="/usuarios"><Icon name="user" /> Usuários</NavLink>}
             {canManageSettings && <NavLink to="/configuracoes"><Icon name="settings" /> Configurações</NavLink>}
             <a href="#" onClick={(e) => { e.preventDefault(); handleLogout(); }}><Icon name="logout" /> Sair</a>

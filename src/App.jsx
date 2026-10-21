@@ -40,6 +40,7 @@ export default function App() {
         <Route path="ordens" element={<ServiceOrders />} />
         <Route path="ordens/nova" element={<ServiceOrderForm />} />
         <Route path="ordens/:id" element={<ServiceOrderDetail />} />
+        <Route path="financeiro" element={<Reports />} />
         <Route path="relatorios" element={<Reports />} />
         <Route
           path="usuarios"

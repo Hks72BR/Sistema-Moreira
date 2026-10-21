@@ -6,6 +6,7 @@ import WhatsappLink, { getWhatsappUrl } from '../components/WhatsappLink';
 import { compressPhoto, compressBase64Photo } from '../lib/photoCompression';
 import * as firestoreApi from '../lib/firestore';
 import * as storage from '../lib/storage';
+import { printServiceOrder, downloadServiceOrderPDF } from '../lib/printer';
 
 const statusLabels = {
   aberta: 'Aberta', em_andamento: 'Em Andamento', aguardando_peca: 'Aguard. Peça',
@@ -26,6 +27,7 @@ export default function ServiceOrderDetail() {
   const { id } = useParams();
   const { api, user, dataVersion } = useAuth();
   const [order, setOrder] = useState(null);
+  const [company, setCompany] = useState({});
   const [loading, setLoading] = useState(true);
   const [logText, setLogText] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
@@ -71,6 +73,7 @@ export default function ServiceOrderDetail() {
   useEffect(() => {
     loadOrder();
     loadPhotos();
+    api('/settings').then(data => { if (data) setCompany(data); }).catch(() => {});
   }, [id, dataVersion]);
 
   useEffect(() => {
@@ -324,6 +327,12 @@ export default function ServiceOrderDetail() {
           )}
         </h2>
         <div className="actions">
+          <button className="btn btn-outline" onClick={() => printServiceOrder(order, company)}>
+            <Icon name="printer" /> Imprimir OS
+          </button>
+          <button className="btn btn-outline" onClick={() => downloadServiceOrderPDF(order, company)}>
+            <Icon name="file" /> PDF
+          </button>
           {nextStatuses.map(s => (
             <button key={s} className={`btn ${s === 'cancelada' ? 'btn-danger' : s === 'entregue' ? 'btn-success' : 'btn-primary'}`} onClick={() => changeStatus(s)}>
               <Icon name={s === 'em_andamento' ? 'play' : s === 'concluida' ? 'check' : s === 'entregue' ? 'package' : s === 'aguardando_peca' ? 'clock' : 'close'} />

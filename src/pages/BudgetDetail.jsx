@@ -6,6 +6,7 @@ import WhatsappLink, { getWhatsappUrl } from '../components/WhatsappLink';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { LOGO_BASE64 } from '../logoBase64';
+import { printBudget } from '../lib/printer';
 
 const statusLabels = { pendente: 'Pendente', aprovado: 'Aprovado', recusado: 'Recusado', expirado: 'Expirado' };
 const steeringLabels = { hidraulica: 'Hidráulica', eletrica: 'Elétrica', eletrohidraulica: 'Eletro-hidráulica', mecanica: 'Mecânica' };
@@ -345,7 +346,8 @@ export default function BudgetDetail() {
       <div className="page-header">
         <h2>Orçamento {budget.code}</h2>
         <div className="actions">
-          <button className="btn btn-primary" onClick={generatePDF}><Icon name="file" /> Baixar PDF</button>
+          <button className="btn btn-primary" onClick={() => printBudget(budget, company)}><Icon name="printer" /> Imprimir</button>
+          <button className="btn btn-outline" onClick={generatePDF}><Icon name="file" /> Baixar PDF</button>
           {budget.status === 'pendente' && (
             <>
               <button className="btn btn-success" onClick={() => updateStatus('aprovado')}><Icon name="check" /> Aprovar</button>
@@ -413,7 +415,8 @@ export default function BudgetDetail() {
           <div className="card">
             <h3 style={{ marginBottom: 12 }}>Ações Rápidas</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <button className="btn btn-primary" onClick={generatePDF} style={{ justifyContent: 'center' }}><Icon name="file" /> Baixar PDF / Imprimir</button>
+              <button className="btn btn-primary" onClick={() => printBudget(budget, company)} style={{ justifyContent: 'center' }}><Icon name="printer" /> Imprimir na Impressora</button>
+              <button className="btn btn-outline" onClick={generatePDF} style={{ justifyContent: 'center' }}><Icon name="file" /> Baixar PDF</button>
               <Link to={`/clientes/${budget.client_id}`} className="btn btn-outline" style={{ justifyContent: 'center' }}><Icon name="user" /> Ver Cliente</Link>
               {budget.status === 'aprovado' && (
                 <button className="btn btn-success" onClick={createOS} disabled={creatingOS} style={{ justifyContent: 'center' }}>

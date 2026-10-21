@@ -981,10 +981,64 @@ export async function getDashboard() {
 }
 
 export async function getMonthlyReport(month, year) {
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 1);
-  const osSnap = await getDocs(col('serviceOrders'));
-  const orders = snapToList(osSnap).map(formatDoc)
+  const isFullYear = !month || Number(month) === 0;
+  const startDate = isFullYear ? new Date(year, 0, 1) : new Date(year, month - 1, 1);
+  const endDate = isFullYear ? new Date(year + 1, 0, 1) : new Date(year, month, 1);
+  const yearStart = new Date(year, 0, 1);
+  const yearEnd = new Date(year + 1, 0, 1);
+
+  const [osSnap, budgetsSnap] = await Promise.all([
+    getDocs(col('serviceOrders')),
+    getDocs(col('budgets')),
+  ]);
+
+  const allYearOrders = snapToList(osSnap)
+    .map(formatDoc)
+    .filter(order => {
+      const createdAt = new Date(order.created_at || order.createdAt);
+      return createdAt >= yearStart && createdAt < yearEnd;
+    });
+
+  // Carregar itens de todas as OS do ano em paralelo para montar evolução anual e totais por OS
+  await Promise.all(
+    allYearOrders.map(async (order) => {
+      const itemsSnap = await getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', order.id, 'items'));
+      const items = snapToList(itemsSnap).map(formatDoc);
+      const serviceTotal = items
+        .filter(i => i.type !== 'peca')
+        .reduce((sum, i) => sum + (Number(i.total) || 0), 0);
+      const partsTotal = items
+        .filter(i => i.type === 'peca')
+        .reduce((sum, i) => sum + (Number(i.total) || 0), 0);
+      order.items = items;
+      order.service_total = serviceTotal;
+      order.parts_total = partsTotal;
+      order.total = serviceTotal + partsTotal;
+      order.assigned_name = order.assigned_to_name || order.assignedToName || order.assigned_name || '';
+    })
+  );
+
+  // Evolução mês a mês do ano selecionado (1 a 12)
+  const yearlyBreakdown = Array.from({ length: 12 }, (_, idx) => {
+    const m = idx + 1;
+    const mStart = new Date(year, idx, 1);
+    const mEnd = new Date(year, idx + 1, 1);
+    const mOrders = allYearOrders.filter(o => {
+      const d = new Date(o.created_at || o.createdAt);
+      return d >= mStart && d < mEnd;
+    });
+    const mCompleted = mOrders.filter(o => ['concluida', 'entregue'].includes(o.status));
+    const mInProgress = mOrders.filter(o => ['aberta', 'em_andamento', 'aguardando_peca'].includes(o.status));
+    return {
+      month: m,
+      osCount: mOrders.length,
+      completedCount: mCompleted.length,
+      revenue: mCompleted.reduce((sum, o) => sum + (o.total || 0), 0),
+      inProgressRevenue: mInProgress.reduce((sum, o) => sum + (o.total || 0), 0),
+    };
+  });
+
+  const orders = allYearOrders
     .filter(order => {
       const createdAt = new Date(order.created_at || order.createdAt);
       return createdAt >= startDate && createdAt < endDate;
@@ -993,25 +1047,123 @@ export async function getMonthlyReport(month, year) {
 
   const totalOS = orders.length;
   const entregues = orders.filter(o => o.status === 'entregue').length;
+  const concluidas = orders.filter(o => o.status === 'concluida').length;
+  const emAndamento = orders.filter(o => ['aberta', 'em_andamento', 'aguardando_peca'].includes(o.status)).length;
   const canceladas = orders.filter(o => o.status === 'cancelada').length;
 
-  // Receita do mês
-  const completedIds = orders.filter(o => ['concluida', 'entregue'].includes(o.status)).map(o => o.id);
-  let revenue = 0;
-  for (const osId of completedIds) {
-    const itemsSnap = await getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', osId, 'items'));
-    revenue += snapToList(itemsSnap).reduce((sum, i) => sum + (i.total || 0), 0);
-  }
+  const completedOrders = orders.filter(o => ['concluida', 'entregue'].includes(o.status));
+  const inProgressOrders = orders.filter(o => ['aberta', 'em_andamento', 'aguardando_peca'].includes(o.status));
+  const canceledOrders = orders.filter(o => o.status === 'cancelada');
 
-  // Por tipo de direção
+  const revenue = completedOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+  const deliveredRevenue = orders
+    .filter(o => o.status === 'entregue')
+    .reduce((sum, o) => sum + (o.total || 0), 0);
+  const awaitingPickupRevenue = orders
+    .filter(o => o.status === 'concluida')
+    .reduce((sum, o) => sum + (o.total || 0), 0);
+  const inProgressRevenue = inProgressOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+  const canceledRevenue = canceledOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+
+  const servicesRevenue = completedOrders.reduce((sum, o) => sum + (o.service_total || 0), 0);
+  const partsRevenue = completedOrders.reduce((sum, o) => sum + (o.parts_total || 0), 0);
+  const averageTicket = completedOrders.length > 0 ? revenue / completedOrders.length : 0;
+
+  // Orçamentos do período
+  const budgets = snapToList(budgetsSnap)
+    .map(formatDoc)
+    .filter(b => {
+      const createdAt = new Date(b.created_at || b.createdAt);
+      return createdAt >= startDate && createdAt < endDate;
+    })
+    .sort((a, b) => new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt));
+
+  const approvedBudgets = budgets.filter(b => b.status === 'aprovado');
+  const pendingBudgets = budgets.filter(b => b.status === 'pendente');
+  const rejectedBudgets = budgets.filter(b => ['recusado', 'expirado'].includes(b.status));
+
+  const budgetsSummary = {
+    total_count: budgets.length,
+    approved_count: approvedBudgets.length,
+    pending_count: pendingBudgets.length,
+    rejected_count: rejectedBudgets.length,
+    approved_total: approvedBudgets.reduce((sum, b) => sum + (Number(b.total) || 0), 0),
+    pending_total: pendingBudgets.reduce((sum, b) => sum + (Number(b.total) || 0), 0),
+    rejected_total: rejectedBudgets.reduce((sum, b) => sum + (Number(b.total) || 0), 0),
+    discount_total: budgets.reduce((sum, b) => sum + (Number(b.discount) || 0), 0),
+    conversion_rate: budgets.length > 0 ? Math.round((approvedBudgets.length / budgets.length) * 100) : 0,
+  };
+
+  // Top serviços e peças do período
+  const serviceCounts = {};
+  for (const order of orders.filter(o => o.status !== 'cancelada')) {
+    for (const item of order.items || []) {
+      const key = item.description || 'Item sem descrição';
+      if (!serviceCounts[key]) {
+        serviceCounts[key] = { description: key, type: item.type || 'servico', count: 0, revenue: 0 };
+      }
+      serviceCounts[key].count += Number(item.quantity) || 1;
+      serviceCounts[key].revenue += Number(item.total) || 0;
+    }
+  }
+  const topServices = Object.values(serviceCounts).sort((a, b) => b.revenue - a.revenue).slice(0, 25);
+
+  // Produtividade e receita por responsável/técnico no período
+  const techCounts = {};
+  for (const o of orders.filter(ord => ord.status !== 'cancelada')) {
+    const name = (o.assigned_to_name || o.assignedToName || o.assigned_name || '').trim() || 'Não atribuído';
+    if (!techCounts[name]) {
+      techCounts[name] = { name, total_os: 0, concluidas: 0, entregues: 0, revenue: 0 };
+    }
+    techCounts[name].total_os++;
+    if (['concluida', 'entregue'].includes(o.status)) {
+      techCounts[name].concluidas++;
+      techCounts[name].revenue += o.total || 0;
+    }
+    if (o.status === 'entregue') {
+      techCounts[name].entregues++;
+    }
+  }
+  const byTechnician = Object.values(techCounts).sort((a, b) => b.revenue - a.revenue);
+
+  // Por tipo de direção (com receita)
   const steeringCounts = {};
   orders.forEach(o => {
     const st = o.steering_type || o.vehicleSteeringType || 'outro';
-    steeringCounts[st] = (steeringCounts[st] || 0) + 1;
+    if (!steeringCounts[st]) steeringCounts[st] = { steering_type: st, count: 0, revenue: 0 };
+    steeringCounts[st].count += 1;
+    if (['concluida', 'entregue'].includes(o.status)) {
+      steeringCounts[st].revenue += o.total || 0;
+    }
   });
-  const bySteeringType = Object.entries(steeringCounts).map(([steering_type, count]) => ({ steering_type, count }));
+  const bySteeringType = Object.values(steeringCounts).sort((a, b) => b.revenue - a.revenue);
 
-  return { orders, totals: { total_os: totalOS, entregues, canceladas }, revenue, bySteeringType, month, year };
+  return {
+    orders,
+    budgets,
+    totals: {
+      total_os: totalOS,
+      entregues,
+      concluidas,
+      em_andamento: emAndamento,
+      canceladas,
+    },
+    revenue,
+    deliveredRevenue,
+    awaitingPickupRevenue,
+    inProgressRevenue,
+    canceledRevenue,
+    servicesRevenue,
+    partsRevenue,
+    averageTicket,
+    budgetsSummary,
+    yearlyBreakdown,
+    topServices,
+    byTechnician,
+    bySteeringType,
+    month,
+    year,
+  };
 }
 
 export async function getClientHistory(clientId) {
