@@ -393,3 +393,4 @@ export default function CatalogItemsEditor({ items, setItems, title = 'Itens do 
     </div>
   );
 }
+

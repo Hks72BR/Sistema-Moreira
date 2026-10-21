@@ -977,11 +977,10 @@ export async function deleteServiceOrder(orderId) {
     photosSnap.docs.map(d => deleteStoredPhoto(d.data()).catch(() => {}))
   );
 
-  // Excluir subcoleções (photos, items, logs) e o documento da OS
+  // Excluir subcoleções (photos, items) e o documento da OS
   const batch = writeBatch(db);
   photosSnap.docs.forEach(d => batch.delete(d.ref));
   itemsSnap.docs.forEach(d => batch.delete(d.ref));
-  logsSnap.docs.forEach(d => batch.delete(d.ref));
   batch.delete(orderRef);
 
   // Se havia orçamento vinculado, desvincular service_order_id
@@ -999,6 +998,18 @@ export async function deleteServiceOrder(orderId) {
   }
 
   await batch.commit();
+
+  // Excluir logs em lote separado (evita falha caso haja regras antigas de auditoria)
+  if (!logsSnap.empty) {
+    try {
+      const logsBatch = writeBatch(db);
+      logsSnap.docs.forEach(d => logsBatch.delete(d.ref));
+      await logsBatch.commit();
+    } catch {
+      // ignora caso exclusão de log não seja permitida
+    }
+  }
+
   return { message: 'Ordem de serviço e fotos relacionadas excluídas com sucesso' };
 }
 

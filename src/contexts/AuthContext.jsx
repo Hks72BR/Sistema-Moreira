@@ -250,7 +250,7 @@ export function AuthProvider({ children }) {
         limitCount: Number(params.get('limit')) || 50,
       });
     }
-    let m = endpoint.match(/^\/clients\/(\w+)/);
+    let m = endpoint.match(/^\/clients\/([^/?]+)/);
     if (m && method === 'GET') {
       const clientId = m[1];
       const params = new URLSearchParams(endpoint.split('?')[1] || '');
@@ -261,9 +261,9 @@ export function AuthProvider({ children }) {
     if (m && method === 'DELETE') return firestoreApi.deleteClient(m[1]);
 
     // ═══ VEHICLES ═══
-    m = endpoint.match(/^\/vehicles\/client\/(\w+)$/);
+    m = endpoint.match(/^\/vehicles\/client\/([^/?]+)$/);
     if (m) return firestoreApi.getVehiclesByClient(m[1]);
-    m = endpoint.match(/^\/vehicles\/(\w+)$/);
+    m = endpoint.match(/^\/vehicles\/([^/?]+)$/);
     if (m && method === 'GET') return firestoreApi.getVehicle(m[1]);
     if (endpoint === '/vehicles' && method === 'POST') return firestoreApi.createVehicle(body);
     if (m && method === 'PUT') return firestoreApi.updateVehicle(m[1], body);
@@ -279,9 +279,9 @@ export function AuthProvider({ children }) {
         limitCount: Number(params.get('limit')) || 50,
       });
     }
-    m = endpoint.match(/^\/budgets\/(\w+)\/status$/);
+    m = endpoint.match(/^\/budgets\/([^/?]+)\/status$/);
     if (m && method === 'PUT') return firestoreApi.updateBudgetStatus(m[1], body.status);
-    m = endpoint.match(/^\/budgets\/(\w+)$/);
+    m = endpoint.match(/^\/budgets\/([^/?]+)$/);
     if (m && method === 'GET') return firestoreApi.getBudget(m[1]);
     if (m && method === 'PUT') return firestoreApi.updateBudget(m[1], body);
     if (m && method === 'DELETE') return firestoreApi.deleteBudget(m[1]);
@@ -298,18 +298,18 @@ export function AuthProvider({ children }) {
         limitCount: Number(params.get('limit')) || 50,
       });
     }
-    m = endpoint.match(/^\/service-orders\/(\w+)\/status$/);
+    m = endpoint.match(/^\/service-orders\/([^/?]+)\/status$/);
     if (m && method === 'PUT') return firestoreApi.updateOrderStatus(m[1], body, user?.id, user?.name);
-    m = endpoint.match(/^\/service-orders\/(\w+)\/logs$/);
+    m = endpoint.match(/^\/service-orders\/([^/?]+)\/logs$/);
     if (m && method === 'POST') return firestoreApi.addOrderLog(m[1], body, user?.id, user?.name);
-    m = endpoint.match(/^\/service-orders\/(\w+)$/);
+    m = endpoint.match(/^\/service-orders\/([^/?]+)$/);
     if (m && method === 'GET') return firestoreApi.getServiceOrder(m[1]);
     if (m && method === 'PUT') return firestoreApi.updateServiceOrder(m[1], body, user?.id, user?.name);
     if (m && method === 'DELETE') return firestoreApi.deleteServiceOrder(m[1]);
     if (endpoint === '/service-orders' && method === 'POST') return firestoreApi.createServiceOrder(body, user?.id, user?.name);
 
     // ═══ PHOTOS ═══
-    m = endpoint.match(/^\/photos\/(\w+)$/);
+    m = endpoint.match(/^\/photos\/([^/?]+)$/);
     if (m && method === 'GET') return firestoreApi.getPhotos(m[1]);
     // Photo upload/delete são tratados diretamente nas pages (não via api())
 
@@ -320,7 +320,7 @@ export function AuthProvider({ children }) {
       const params = new URLSearchParams(endpoint.split('?')[1] || '');
       return firestoreApi.getMonthlyReport(Number(params.get('month')), Number(params.get('year')));
     }
-    m = endpoint.match(/^\/reports\/client-history\/(\w+)$/);
+    m = endpoint.match(/^\/reports\/client-history\/([^/?]+)$/);
     if (m) return firestoreApi.getClientHistory(m[1]);
     m = endpoint.match(/^\/reports\/services/);
     if (m) {
@@ -330,14 +330,14 @@ export function AuthProvider({ children }) {
 
     if (import.meta.env.MODE === 'offline') {
       if (endpoint === '/users' && method === 'GET') return firestoreApi.getUsers();
-      m = endpoint.match(/^\/users\/(\w+)\/reset-password$/);
+      m = endpoint.match(/^\/users\/([^/?]+)\/reset-password$/);
       if (m && method === 'PUT') {
         const targetUser = await firestoreApi.getUser(m[1]);
         const email = targetUser.email || (targetUser.username?.includes('@') ? targetUser.username : `${targetUser.username}@moreira.app`);
         await sendPasswordResetEmail(auth, email);
         return { message: `Email de redefinição enviado para ${email}` };
       }
-      m = endpoint.match(/^\/users\/(\w+)$/);
+      m = endpoint.match(/^\/users\/([^/?]+)$/);
       if (m && method === 'GET') return firestoreApi.getUser(m[1]);
       if (m && method === 'PUT') return firestoreApi.updateUser(m[1], body);
       if (endpoint === '/users' && method === 'POST') {
@@ -358,9 +358,9 @@ export function AuthProvider({ children }) {
 
     // ═══ INVOICES ═══
     if (endpoint === '/invoices' && method === 'GET') return firestoreApi.getInvoices();
-    m = endpoint.match(/^\/invoices\/(\w+)\/status$/);
+    m = endpoint.match(/^\/invoices\/([^/?]+)\/status$/);
     if (m && method === 'PUT') return firestoreApi.updateInvoiceStatus(m[1], body.status);
-    m = endpoint.match(/^\/invoices\/(\w+)$/);
+    m = endpoint.match(/^\/invoices\/([^/?]+)$/);
     if (m && method === 'GET') return firestoreApi.getInvoice(m[1]);
     if (endpoint === '/invoices' && method === 'POST') return firestoreApi.createInvoice(body);
 

@@ -170,3 +170,4 @@ export const ALL_CATALOG_ITEMS = [
     group.items.map(name => ({ name, type: 'peca', category: group.category }))
   ),
 ];
+

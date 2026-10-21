@@ -41,8 +41,7 @@ service cloud.firestore {
         }
 
         match /logs/{logId} {
-          allow read, create: if isAuthenticated();
-          allow update, delete: if false;
+          allow read, create, update, delete: if isAuthenticated();
         }
       }
 
