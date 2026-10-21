@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Icon from '../components/Icon';
 import WhatsappLink, { getWhatsappUrl } from '../components/WhatsappLink';
@@ -27,9 +27,11 @@ const statusFlow = {
 export default function ServiceOrderDetail() {
   const { id } = useParams();
   const { api, user, dataVersion } = useAuth();
+  const navigate = useNavigate();
   const [order, setOrder] = useState(null);
   const [company, setCompany] = useState({});
   const [loading, setLoading] = useState(true);
+  const [deletingOrder, setDeletingOrder] = useState(false);
   const [logText, setLogText] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
@@ -200,7 +202,7 @@ export default function ServiceOrderDetail() {
         const fileName = `os-${id}-${ts}-${i}.jpg`;
         
         // Upload para Cloudinary
-        const { downloadUrl, storagePath } = await storage.uploadPhotoFile('moreira', id, file, fileName);
+        const { downloadUrl, storagePath, deleteToken } = await storage.uploadPhotoFile('moreira', id, file, fileName);
 
         // Salvar localmente também (Electron)
         if (downloadUrl) {
@@ -221,6 +223,7 @@ export default function ServiceOrderDetail() {
           localFilename: fileName,
           url: downloadUrl,
           storagePath: storagePath,
+          deleteToken: deleteToken || '',
           originalName: file.name,
           label: photoPhase === 'entrada' ? 'Foto de entrada' : 'Foto de saída',
           phase: photoPhase,
@@ -266,7 +269,7 @@ export default function ServiceOrderDetail() {
       const fileName = `os-${id}-${ts}.jpg`;
       
       // Upload para Cloudinary
-      const { downloadUrl, storagePath } = await storage.uploadPhotoBase64('moreira', id, dataUrl);
+      const { downloadUrl, storagePath, deleteToken } = await storage.uploadPhotoBase64('moreira', id, dataUrl);
 
       // Salvar localmente também (Electron)
       if (window.electronAPI) {
@@ -277,6 +280,7 @@ export default function ServiceOrderDetail() {
         localFilename: fileName,
         url: downloadUrl,
         storagePath: storagePath,
+        deleteToken: deleteToken || '',
         originalName: fileName,
         label: photoPhase === 'entrada' ? 'Foto de entrada' : 'Foto de saída',
         phase: photoPhase,
@@ -298,13 +302,28 @@ export default function ServiceOrderDetail() {
     if (!confirm('Remover esta foto?')) return;
     try {
       const photo = photos.find(p => p.id === photoId);
-      const localName = photo?.localFilename || photo?.filename || '';
-      if (window.electronAPI && localName) {
-        await window.electronAPI.deletePhoto(localName);
+      if (photo) {
+        await storage.deleteStoredPhoto(photo);
       }
       await firestoreApi.deletePhotoDoc(id, photoId);
       loadPhotos();
     } catch (err) { alert(err.message); }
+  };
+
+  const handleDeleteOrder = async () => {
+    if (deletingOrder) return;
+    if (!confirm(`Deseja realmente excluir a OS ${order?.code || ''} e todas as fotos relacionadas a ela? Esta ação não pode ser desfeita.`)) {
+      return;
+    }
+    setDeletingOrder(true);
+    try {
+      await api(`/service-orders/${id}`, { method: 'DELETE' });
+      setShowEditModal(false);
+      navigate('/ordens');
+    } catch (err) {
+      alert(err.message);
+      setDeletingOrder(false);
+    }
   };
 
   if (loading) return <div className="loading">Carregando...</div>;
@@ -341,6 +360,9 @@ export default function ServiceOrderDetail() {
             </button>
           ))}
           <button className="btn btn-outline" onClick={openEdit}><Icon name="edit" /> Editar</button>
+          <button className="btn btn-danger btn-sm" onClick={handleDeleteOrder} disabled={deletingOrder}>
+            {deletingOrder ? 'Excluindo...' : 'Excluir OS'}
+          </button>
         </div>
       </div>
 
@@ -646,9 +668,19 @@ export default function ServiceOrderDetail() {
               <label>Observações</label>
               <textarea value={editForm.notes} onChange={e => setEditForm({...editForm, notes: e.target.value})} />
             </div>
-            <div className="form-actions">
-              <button className="btn btn-outline" onClick={() => setShowEditModal(false)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={saveEdit}>Salvar</button>
+            <div className="form-actions" style={{ justifyContent: 'space-between' }}>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={handleDeleteOrder}
+                disabled={deletingOrder}
+              >
+                {deletingOrder ? 'Excluindo...' : 'Excluir OS'}
+              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn btn-outline" onClick={() => setShowEditModal(false)}>Cancelar</button>
+                <button className="btn btn-primary" onClick={saveEdit}>Salvar</button>
+              </div>
             </div>
           </div>
         </div>

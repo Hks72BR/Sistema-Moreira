@@ -305,6 +305,7 @@ export function AuthProvider({ children }) {
     m = endpoint.match(/^\/service-orders\/(\w+)$/);
     if (m && method === 'GET') return firestoreApi.getServiceOrder(m[1]);
     if (m && method === 'PUT') return firestoreApi.updateServiceOrder(m[1], body, user?.id, user?.name);
+    if (m && method === 'DELETE') return firestoreApi.deleteServiceOrder(m[1]);
     if (endpoint === '/service-orders' && method === 'POST') return firestoreApi.createServiceOrder(body, user?.id, user?.name);
 
     // ═══ PHOTOS ═══

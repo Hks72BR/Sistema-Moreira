@@ -5,7 +5,7 @@ import {
   writeBatch as rawWriteBatch, getCountFromServer, runTransaction
 } from 'firebase/firestore';
 import { db, COMPANY_ID } from './firebase';
-import { uploadPhotoFile, uploadPhotoBase64 } from './storage';
+import { uploadPhotoFile, uploadPhotoBase64, deleteStoredPhoto } from './storage';
 
 // ═══ Offline-Resilient Helpers ═══
 
@@ -548,7 +548,6 @@ export async function updateBudget(budgetId, data) {
   const ref = docRef(`budgets/${budgetId}`);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('Orçamento não encontrado');
-  if (snap.data().status !== 'pendente') throw new Error('Apenas orçamentos pendentes podem ser editados');
 
   if (data.items && data.items.length) {
     // Deletar itens antigos
@@ -570,13 +569,23 @@ export async function updateBudget(budgetId, data) {
     await batch.commit();
 
     const subtotal = items.reduce((sum, i) => sum + i.total, 0);
-    const discount = Number(data.discount) || snap.data().discount || 0;
+    const discount = data.discount !== undefined ? Number(data.discount) || 0 : snap.data().discount || 0;
     await updateDoc(ref, {
       subtotal,
       discount,
       total: subtotal - discount,
-      notes: data.notes ?? snap.data().notes,
-      valid_until: data.valid_until ?? data.validUntil ?? snap.data().valid_until,
+      notes: data.notes ?? snap.data().notes ?? '',
+      valid_until: data.valid_until ?? data.validUntil ?? snap.data().valid_until ?? '',
+      updated_at: serverTimestamp(),
+    });
+  } else {
+    const subtotal = snap.data().subtotal || 0;
+    const discount = data.discount !== undefined ? Number(data.discount) || 0 : snap.data().discount || 0;
+    await updateDoc(ref, {
+      discount,
+      total: subtotal - discount,
+      notes: data.notes ?? snap.data().notes ?? '',
+      valid_until: data.valid_until ?? data.validUntil ?? snap.data().valid_until ?? '',
       updated_at: serverTimestamp(),
     });
   }
@@ -584,14 +593,18 @@ export async function updateBudget(budgetId, data) {
 }
 
 export async function deleteBudget(budgetId) {
-  const [legacySnap, currentSnap] = await Promise.all([
-    getDocs(query(col('serviceOrders'), where('budgetId', '==', budgetId), limit(1))),
-    getDocs(query(col('serviceOrders'), where('budget_id', '==', budgetId), limit(1))),
+  const [legacySnap, currentSnap, itemsSnap] = await Promise.all([
+    getDocs(query(col('serviceOrders'), where('budgetId', '==', budgetId))),
+    getDocs(query(col('serviceOrders'), where('budget_id', '==', budgetId))),
+    getDocs(collection(db, 'companies', COMPANY_ID, 'budgets', budgetId, 'items')),
   ]);
-  if (!legacySnap.empty || !currentSnap.empty) throw new Error('Não é possível excluir: orçamento vinculado a uma OS');
-  // Deletar itens + doc
-  const itemsSnap = await getDocs(collection(db, 'companies', COMPANY_ID, 'budgets', budgetId, 'items'));
+
   const batch = writeBatch(db);
+  // Se houver OS vinculada, desvincular para permitir excluir o orçamento livremente
+  const linkedOrders = mergeSnapshots(legacySnap, currentSnap);
+  for (const os of linkedOrders) {
+    batch.update(docRef(`serviceOrders/${os.id}`), { budget_id: null, budgetId: null, budget_code: '' });
+  }
   itemsSnap.docs.forEach(d => batch.delete(d.ref));
   batch.delete(docRef(`budgets/${budgetId}`));
   await batch.commit();
@@ -947,6 +960,48 @@ export async function updateServiceOrder(orderId, data, userId, userName) {
   return { message: 'OS atualizada com sucesso' };
 }
 
+export async function deleteServiceOrder(orderId) {
+  const orderRef = docRef(`serviceOrders/${orderId}`);
+  const orderSnap = await getDoc(orderRef);
+  if (!orderSnap.exists()) throw new Error('Ordem de serviço não encontrada');
+  const orderData = orderSnap.data();
+
+  const [itemsSnap, logsSnap, photosSnap] = await Promise.all([
+    getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'items')),
+    getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'logs')),
+    getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'photos')),
+  ]);
+
+  // Excluir arquivos de fotos (Cloudinary / armazenamento local)
+  await Promise.all(
+    photosSnap.docs.map(d => deleteStoredPhoto(d.data()).catch(() => {}))
+  );
+
+  // Excluir subcoleções (photos, items, logs) e o documento da OS
+  const batch = writeBatch(db);
+  photosSnap.docs.forEach(d => batch.delete(d.ref));
+  itemsSnap.docs.forEach(d => batch.delete(d.ref));
+  logsSnap.docs.forEach(d => batch.delete(d.ref));
+  batch.delete(orderRef);
+
+  // Se havia orçamento vinculado, desvincular service_order_id
+  const linkedBudgetId = orderData.budget_id || orderData.budgetId;
+  if (linkedBudgetId) {
+    try {
+      const bRef = docRef(`budgets/${linkedBudgetId}`);
+      const bSnap = await getDoc(bRef);
+      if (bSnap.exists()) {
+        batch.update(bRef, { service_order_id: null, updated_at: serverTimestamp() });
+      }
+    } catch {
+      // ignora caso o orçamento não exista mais
+    }
+  }
+
+  await batch.commit();
+  return { message: 'Ordem de serviço e fotos relacionadas excluídas com sucesso' };
+}
+
 export async function addOrderLog(orderId, logData, userId, userName) {
   if (!logData.description) throw new Error('Descrição é obrigatória');
   await addDoc(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'logs'), {
@@ -975,12 +1030,13 @@ export async function uploadPhotos(orderId, files, { label, phase }, userId, use
 
   const results = [];
   for (const file of files) {
-    const { storagePath, downloadUrl, filename } = await uploadPhotoFile(COMPANY_ID, orderId, file);
+    const { storagePath, downloadUrl, filename, deleteToken } = await uploadPhotoFile(COMPANY_ID, orderId, file);
     const photoRef = await addDoc(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'photos'), {
       filename,
       originalName: file.name || filename,
       storagePath,
       downloadUrl,
+      deleteToken: deleteToken || '',
       label: label || 'Foto do veículo',
       phase: phase || 'entrada',
       uploadedBy: userId,
@@ -1004,12 +1060,13 @@ export async function uploadCapturedPhoto(orderId, base64Image, { label, phase }
   const orderSnap = await getDoc(docRef(`serviceOrders/${orderId}`));
   if (!orderSnap.exists()) throw new Error('OS não encontrada');
 
-  const { storagePath, downloadUrl, filename } = await uploadPhotoBase64(COMPANY_ID, orderId, base64Image);
+  const { storagePath, downloadUrl, filename, deleteToken } = await uploadPhotoBase64(COMPANY_ID, orderId, base64Image);
   const photoRef = await addDoc(collection(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'photos'), {
     filename,
     originalName: filename,
     storagePath,
     downloadUrl,
+    deleteToken: deleteToken || '',
     label: label || 'Foto do veículo',
     phase: phase || 'entrada',
     uploadedBy: userId,
@@ -1037,7 +1094,16 @@ export async function addPhotoDoc(orderId, data) {
 }
 
 export async function deletePhotoDoc(orderId, photoId) {
-  await deleteDoc(doc(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'photos', photoId));
+  const ref = doc(db, 'companies', COMPANY_ID, 'serviceOrders', orderId, 'photos', photoId);
+  try {
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      await deleteStoredPhoto(snap.data());
+    }
+  } catch {
+    // continua com a exclusão do doc
+  }
+  await deleteDoc(ref);
   return { message: 'Foto removida' };
 }
 

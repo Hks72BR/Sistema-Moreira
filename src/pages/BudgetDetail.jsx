@@ -7,6 +7,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { LOGO_BASE64 } from '../logoBase64';
 import { printBudget } from '../lib/printer';
+import CatalogItemsEditor from '../components/CatalogItemsEditor';
 
 const statusLabels = { pendente: 'Pendente', aprovado: 'Aprovado', recusado: 'Recusado', expirado: 'Expirado' };
 const steeringLabels = { hidraulica: 'Hidráulica', eletrica: 'Elétrica', eletrohidraulica: 'Eletro-hidráulica', mecanica: 'Mecânica' };
@@ -19,9 +20,19 @@ export default function BudgetDetail() {
   const [loading, setLoading] = useState(true);
   const [company, setCompany] = useState({});
   const [creatingOS, setCreatingOS] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editItems, setEditItems] = useState([]);
+  const [editDiscount, setEditDiscount] = useState(0);
+  const [editValidUntil, setEditValidUntil] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+
+  const loadBudget = () => {
+    api(`/budgets/${id}`).then(data => { setBudget(data); setLoading(false); }).catch(() => setLoading(false));
+  };
 
   useEffect(() => {
-    api(`/budgets/${id}`).then(data => { setBudget(data); setLoading(false); }).catch(() => setLoading(false));
+    loadBudget();
     api('/settings').then(data => setCompany(data)).catch(() => {});
   }, [id, dataVersion]);
 
@@ -328,10 +339,55 @@ export default function BudgetDetail() {
     }
   };
 
+  const openEditBudget = () => {
+    setEditItems(
+      budget.items?.length
+        ? budget.items.map(i => ({
+            description: i.description || '',
+            type: i.type || 'servico',
+            quantity: Number(i.quantity) || 1,
+            unit_price: Number(i.unit_price) || 0,
+          }))
+        : [{ description: '', type: 'servico', quantity: 1, unit_price: 0 }]
+    );
+    setEditDiscount(Number(budget.discount) || 0);
+    setEditValidUntil(budget.valid_until ? String(budget.valid_until).slice(0, 10) : '');
+    setEditNotes(budget.notes || '');
+    setShowEditModal(true);
+  };
+
+  const saveEditBudget = async () => {
+    if (savingEdit) return;
+    const validItems = editItems.filter(i => i.description && Number(i.unit_price) > 0);
+    if (validItems.length === 0) {
+      alert('Adicione pelo menos um item com descrição e valor.');
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await api(`/budgets/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          items: validItems,
+          discount: editDiscount,
+          valid_until: editValidUntil || '',
+          notes: editNotes,
+        }),
+      });
+      setShowEditModal(false);
+      loadBudget();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const handleDelete = async () => {
-    if (!confirm('Excluir este orçamento?')) return;
+    if (!confirm(`Deseja realmente excluir o orçamento ${budget?.code || ''}? Esta ação não pode ser desfeita.`)) return;
     try {
       await api(`/budgets/${id}`, { method: 'DELETE' });
+      setShowEditModal(false);
       navigate('/orcamentos');
     } catch (err) {
       alert(err.message);
@@ -359,9 +415,8 @@ export default function BudgetDetail() {
               {creatingOS ? 'Gerando OS...' : <><Icon name="wrench" /> Gerar OS</>}
             </button>
           )}
-          {budget.status === 'pendente' && (
-            <button className="btn btn-danger btn-sm" onClick={handleDelete}>Excluir</button>
-          )}
+          <button className="btn btn-outline" onClick={openEditBudget}><Icon name="edit" /> Editar</button>
+          <button className="btn btn-danger btn-sm" onClick={handleDelete}>Excluir</button>
         </div>
       </div>
 
@@ -417,16 +472,70 @@ export default function BudgetDetail() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <button className="btn btn-primary" onClick={() => printBudget(budget, company)} style={{ justifyContent: 'center' }}><Icon name="printer" /> Imprimir na Impressora</button>
               <button className="btn btn-outline" onClick={generatePDF} style={{ justifyContent: 'center' }}><Icon name="file" /> Baixar PDF</button>
+              <button className="btn btn-outline" onClick={openEditBudget} style={{ justifyContent: 'center' }}><Icon name="edit" /> Editar Orçamento</button>
               <Link to={`/clientes/${budget.client_id}`} className="btn btn-outline" style={{ justifyContent: 'center' }}><Icon name="user" /> Ver Cliente</Link>
               {budget.status === 'aprovado' && (
                 <button className="btn btn-success" onClick={createOS} disabled={creatingOS} style={{ justifyContent: 'center' }}>
                   {creatingOS ? 'Gerando OS...' : <><Icon name="wrench" /> Gerar Ordem de Serviço</>}
                 </button>
               )}
+              <button className="btn btn-danger" onClick={handleDelete} style={{ justifyContent: 'center' }}>
+                Excluir Orçamento
+              </button>
             </div>
           </div>
         </div>
       </div>
+
+      {showEditModal && (
+        <div className="modal-overlay" onClick={() => !savingEdit && setShowEditModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 780 }}>
+            <h3>Editar Orçamento {budget.code}</h3>
+            <CatalogItemsEditor items={editItems} setItems={setEditItems} title="Itens do Orçamento" />
+            <div className="form-grid" style={{ marginTop: 16 }}>
+              <div className="form-group">
+                <label>Desconto (R$)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editDiscount}
+                  onChange={e => setEditDiscount(Number(e.target.value))}
+                />
+              </div>
+              <div className="form-group">
+                <label>Validade</label>
+                <input
+                  type="date"
+                  value={editValidUntil}
+                  onChange={e => setEditValidUntil(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <label>Observações</label>
+              <textarea
+                value={editNotes}
+                onChange={e => setEditNotes(e.target.value)}
+                placeholder="Observações sobre o orçamento..."
+              />
+            </div>
+            <div className="form-actions" style={{ justifyContent: 'space-between' }}>
+              <button type="button" className="btn btn-danger" onClick={handleDelete}>
+                Excluir Orçamento
+              </button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button type="button" className="btn btn-outline" onClick={() => setShowEditModal(false)} disabled={savingEdit}>
+                  Cancelar
+                </button>
+                <button type="button" className="btn btn-primary" onClick={saveEditBudget} disabled={savingEdit}>
+                  {savingEdit ? 'Salvando...' : 'Salvar Alterações'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

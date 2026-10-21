@@ -20,11 +20,12 @@ async function uploadLocalPhoto(orderId, file, filename, alreadyCompressed = fal
     storagePath: `local/${orderId}/${name}`,
     downloadUrl: await toDataUrl(compressed),
     filename: name,
+    deleteToken: '',
   };
 }
 
 /**
- * Upload de foto para armazenamento local no desenvolvimento e Cloudinary em produção.
+ * Upload de foto para armazenamento local no desenvolvimento/offline e Cloudinary em produção.
  */
 export async function uploadPhotoFile(companyId, orderId, file, filename) {
   if (import.meta.env.DEV || import.meta.env.MODE === 'offline' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
@@ -52,5 +53,23 @@ export async function uploadPhotoBase64(companyId, orderId, base64String) {
     console.warn('Falha no upload base64 Cloudinary (possível queda de internet), salvando foto comprimida localmente:', err);
     const compressed = await compressBase64Photo(base64String);
     return uploadLocalPhoto(orderId, compressed, `os-${orderId}-${Date.now()}.jpg`, true);
+  }
+}
+
+/**
+ * Remove os arquivos físicos/remotos associados a um registro de foto.
+ */
+export async function deleteStoredPhoto(photo) {
+  if (!photo) return;
+  const localName = photo.localFilename || photo.filename || '';
+  if (typeof window !== 'undefined' && window.electronAPI && localName) {
+    try {
+      await window.electronAPI.deletePhoto(localName);
+    } catch {
+      // ignora caso não exista localmente
+    }
+  }
+  if (photo.deleteToken) {
+    await cloudinaryStorage.deleteCloudinaryPhoto(photo.deleteToken);
   }
 }
