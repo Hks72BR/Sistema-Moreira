@@ -7,7 +7,7 @@ const STATIC_ASSETS = [
   '/icons/icon-512.png',
 ];
 
-// Install: cache shell
+// Install: pre-cache shell & activate immediately
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_ASSETS))
@@ -15,32 +15,45 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate: clean old caches
+// Activate: remove all older caches and claim all open tabs immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    ).then(() => self.clients.claim())
   );
-  self.clients.claim();
 });
 
-// Fetch: network-first for API/Firebase, cache-first for static assets
+// Allow client to trigger skipWaiting explicitly
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
+// Fetch strategy
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Skip non-GET and Firebase/Google API requests
+  // Skip non-GET and external/Firebase/Cloudinary requests
   if (event.request.method !== 'GET') return;
-  if (url.hostname.includes('googleapis.com') || url.hostname.includes('firebaseio.com')) return;
-  if (url.hostname.includes('firestore.googleapis.com')) return;
+  if (url.origin !== self.location.origin) return;
 
-  // For navigation requests, serve fresh index.html (SPA) and update cache
-  if (event.request.mode === 'navigate') {
+  // Never cache version.json or sw.js
+  if (url.pathname === '/version.json' || url.pathname === '/sw.js') {
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
+    return;
+  }
+
+  // Navigation requests (HTML): always network-first with no-store so updates apply immediately, fallback to cache when offline
+  if (event.request.mode === 'navigate' || url.pathname === '/index.html') {
     event.respondWith(
-      fetch(event.request, { cache: 'no-cache' })
+      fetch(event.request, { cache: 'no-store' })
         .then((response) => {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put('/', clone));
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('/', clone));
+          }
           return response;
         })
         .catch(() => caches.match('/'))
@@ -48,10 +61,11 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for static assets
+  // Hashed Vite assets (/assets/*) and static files: cache-first with network fallback
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
+      if (cached) return cached;
+      return fetch(event.request).then((response) => {
         if (response.ok && url.origin === self.location.origin) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
