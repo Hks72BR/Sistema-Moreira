@@ -7,6 +7,7 @@ import { compressPhoto, compressBase64Photo } from '../lib/photoCompression';
 import * as firestoreApi from '../lib/firestore';
 import * as storage from '../lib/storage';
 import { printServiceOrder, downloadServiceOrderPDF } from '../lib/printer';
+import { SERVICE_CATALOG, PARTS_CATALOG } from '../lib/catalog';
 
 const statusLabels = {
   aberta: 'Aberta', em_andamento: 'Em Andamento', aguardando_peca: 'Aguard. Peça',
@@ -582,12 +583,60 @@ export default function ServiceOrderDetail() {
               <textarea value={editForm.diagnosis} onChange={e => setEditForm({...editForm, diagnosis: e.target.value})} />
             </div>
             <div className="form-group">
-              <label>Serviços Realizados</label>
-              <textarea value={editForm.services_performed} onChange={e => setEditForm({...editForm, services_performed: e.target.value})} placeholder="Descreva os serviços realizados..." />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
+                <label style={{ margin: 0 }}>Serviços Realizados</label>
+                <select
+                  value=""
+                  onChange={e => {
+                    if (!e.target.value) return;
+                    const line = `• ${e.target.value}`;
+                    const current = (editForm.services_performed || '').trim();
+                    setEditForm({
+                      ...editForm,
+                      services_performed: current ? `${current}\n${line}` : line,
+                    });
+                  }}
+                  style={{ width: 'auto', maxWidth: 280, padding: '4px 28px 4px 10px', fontSize: 12 }}
+                >
+                  <option value="">+ Inserir serviço da lista...</option>
+                  {SERVICE_CATALOG.map(group => (
+                    <optgroup key={group.category} label={group.category}>
+                      {group.items.map(item => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <textarea value={editForm.services_performed} onChange={e => setEditForm({...editForm, services_performed: e.target.value})} placeholder="Descreva os serviços realizados ou selecione acima..." />
             </div>
             <div className="form-group">
-              <label>Peças Utilizadas</label>
-              <textarea value={editForm.parts_used} onChange={e => setEditForm({...editForm, parts_used: e.target.value})} placeholder="Liste as peças utilizadas..." />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6, gap: 8, flexWrap: 'wrap' }}>
+                <label style={{ margin: 0 }}>Peças Utilizadas</label>
+                <select
+                  value=""
+                  onChange={e => {
+                    if (!e.target.value) return;
+                    const line = `• ${e.target.value}`;
+                    const current = (editForm.parts_used || '').trim();
+                    setEditForm({
+                      ...editForm,
+                      parts_used: current ? `${current}\n${line}` : line,
+                    });
+                  }}
+                  style={{ width: 'auto', maxWidth: 280, padding: '4px 28px 4px 10px', fontSize: 12 }}
+                >
+                  <option value="">+ Inserir peça da lista...</option>
+                  {PARTS_CATALOG.map(group => (
+                    <optgroup key={group.category} label={group.category}>
+                      {group.items.map(item => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <textarea value={editForm.parts_used} onChange={e => setEditForm({...editForm, parts_used: e.target.value})} placeholder="Liste as peças utilizadas ou selecione acima..." />
             </div>
             <div className="form-group">
               <label>KM Saída</label>

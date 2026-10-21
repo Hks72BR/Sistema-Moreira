@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import WhatsappLink from '../components/WhatsappLink';
+import CatalogItemsEditor from '../components/CatalogItemsEditor';
 
 export default function ServiceOrderForm() {
   const { api } = useAuth();
@@ -54,10 +55,6 @@ export default function ServiceOrderForm() {
     setClients([]);
     loadVehicles(c.id);
   };
-
-  const addItem = () => setItems([...items, { description: '', type: 'servico', quantity: 1, unit_price: 0 }]);
-  const updateItem = (index, field, value) => { const n = [...items]; n[index][field] = value; setItems(n); };
-  const removeItem = (index) => { if (items.length > 1) setItems(items.filter((_, i) => i !== index)); };
 
   const formatCurrency = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
   const total = items.reduce((sum, i) => sum + (i.quantity * i.unit_price), 0);
@@ -154,25 +151,7 @@ export default function ServiceOrderForm() {
             <textarea value={diagnosis} onChange={e => setDiagnosis(e.target.value)} placeholder="Descreva o problema relatado pelo cliente e o diagnóstico inicial..." />
           </div>
 
-          <h3 style={{ margin: '20px 0 12px', fontSize: 16, color: 'var(--text)' }}>Serviços e Peças</h3>
-          <div className="items-table">
-            <div className="item-row" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-muted)' }}>
-              <span>Descrição</span><span>Tipo</span><span>Qtd</span><span>Vlr Unit.</span><span>Total</span><span></span>
-            </div>
-            {items.map((item, i) => (
-              <div key={i} className="item-row">
-                <input value={item.description} onChange={e => updateItem(i, 'description', e.target.value)} placeholder="Descrição" />
-                <select value={item.type} onChange={e => updateItem(i, 'type', e.target.value)}>
-                  <option value="servico">Serviço</option><option value="peca">Peça</option>
-                </select>
-                <input type="number" min="1" value={item.quantity} onChange={e => updateItem(i, 'quantity', Number(e.target.value))} />
-                <input type="number" min="0" step="0.01" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', Number(e.target.value))} />
-                <span className="item-total">{formatCurrency(item.quantity * item.unit_price)}</span>
-                <button type="button" className="btn-remove-item" onClick={() => removeItem(i)}>✕</button>
-              </div>
-            ))}
-            <button type="button" className="btn-add-item" onClick={addItem}>+ Adicionar Item</button>
-          </div>
+          <CatalogItemsEditor items={items} setItems={setItems} title="Serviços e Peças" />
           <div style={{ textAlign: 'right', margin: '12px 0' }}><strong>Total: {formatCurrency(total)}</strong></div>
 
           <div className="form-group">

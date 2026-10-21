@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import WhatsappLink from '../components/WhatsappLink';
+import CatalogItemsEditor from '../components/CatalogItemsEditor';
 
 export default function BudgetForm() {
   const { api } = useAuth();
@@ -45,19 +46,6 @@ export default function BudgetForm() {
     setClientSearch(c.name);
     setClients([]);
     loadVehicles(c.id);
-  };
-
-  const addItem = () => setItems([...items, { description: '', type: 'servico', quantity: 1, unit_price: 0 }]);
-
-  const updateItem = (index, field, value) => {
-    const newItems = [...items];
-    newItems[index][field] = value;
-    setItems(newItems);
-  };
-
-  const removeItem = (index) => {
-    if (items.length === 1) return;
-    setItems(items.filter((_, i) => i !== index));
   };
 
   const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
@@ -136,26 +124,7 @@ export default function BudgetForm() {
             </div>
           </div>
 
-          <h3 style={{ margin: '20px 0 12px', fontSize: 16 }}>Itens do Orçamento</h3>
-          <div className="items-table">
-            <div className="item-row" style={{ fontWeight: 600, fontSize: 13, color: '#64748b' }}>
-              <span>Descrição</span><span>Tipo</span><span>Qtd</span><span>Vlr Unit.</span><span>Total</span><span></span>
-            </div>
-            {items.map((item, i) => (
-              <div key={i} className="item-row">
-                <input value={item.description} onChange={e => updateItem(i, 'description', e.target.value)} placeholder="Descrição do serviço/peça" />
-                <select value={item.type} onChange={e => updateItem(i, 'type', e.target.value)}>
-                  <option value="servico">Serviço</option>
-                  <option value="peca">Peça</option>
-                </select>
-                <input type="number" min="1" value={item.quantity} onChange={e => updateItem(i, 'quantity', Number(e.target.value))} />
-                <input type="number" min="0" step="0.01" value={item.unit_price} onChange={e => updateItem(i, 'unit_price', Number(e.target.value))} />
-                <span className="item-total">{formatCurrency(item.quantity * item.unit_price)}</span>
-                <button type="button" className="btn-remove-item" onClick={() => removeItem(i)}>✕</button>
-              </div>
-            ))}
-            <button type="button" className="btn-add-item" onClick={addItem}>+ Adicionar Item</button>
-          </div>
+          <CatalogItemsEditor items={items} setItems={setItems} title="Itens do Orçamento" />
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 20, marginTop: 16 }}>
             <div><span style={{ color: '#64748b' }}>Subtotal: </span><strong>{formatCurrency(subtotal)}</strong></div>

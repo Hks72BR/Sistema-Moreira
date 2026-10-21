@@ -499,7 +499,6 @@ textarea { resize: vertical; min-height: 80px; }
   margin-bottom: 20px;
   transition: var(--transition-spring);
   position: relative;
-  overflow: hidden;
 }
 
 .card::before {
