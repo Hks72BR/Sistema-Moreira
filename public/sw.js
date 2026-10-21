@@ -1,6 +1,7 @@
-const CACHE_NAME = 'moreira-v5';
+const CACHE_NAME = 'moreira-v6';
 const STATIC_ASSETS = [
   '/',
+  '/logo.png',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

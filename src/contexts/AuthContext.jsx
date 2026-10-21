@@ -21,6 +21,7 @@ import * as firestoreApi from '../lib/firestore';
 const defaultAuthContext = {
   user: null,
   loading: true,
+  isOnline: true,
   login: async () => {},
   logout: async () => {},
   api: async () => {},
@@ -32,8 +33,41 @@ const AuthContext = createContext(defaultAuthContext);
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [initializationError, setInitializationError] = useState('');
   const [dataVersion, setDataVersion] = useState(0);
+
+  useEffect(() => {
+    const handleOnline = async () => {
+      setIsOnline(true);
+      if (import.meta.env.MODE !== 'offline' && !auth.currentUser) {
+        const savedName = (sessionStorage.getItem('moreira.userName') || localStorage.getItem('moreira.userName') || '').trim();
+        if (savedName) {
+          try {
+            const cred = await signInAnonymously(auth);
+            setUser({
+              id: cred.user.uid,
+              username: savedName,
+              name: savedName,
+              role: 'admin',
+              email: null,
+            });
+          } catch (e) {
+            console.warn('Reconectando sessão anônima:', e);
+          }
+        }
+      }
+      setDataVersion(v => v + 1);
+    };
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -56,7 +90,7 @@ export function AuthProvider({ children }) {
         return;
       } else if (firebaseUser?.isAnonymous) {
         try {
-          const name = sessionStorage.getItem('moreira.userName')?.trim();
+          const name = (sessionStorage.getItem('moreira.userName') || localStorage.getItem('moreira.userName') || '')?.trim();
           setUser(name ? {
             id: firebaseUser.uid,
             username: name,
@@ -68,6 +102,19 @@ export function AuthProvider({ children }) {
           console.error('Falha ao recuperar o nome do usuário:', error);
           setUser(null);
           setInitializationError('Nao foi possivel recuperar o usuario salvo neste dispositivo.');
+        }
+      } else if (import.meta.env.MODE !== 'offline') {
+        const savedName = (sessionStorage.getItem('moreira.userName') || localStorage.getItem('moreira.userName') || '')?.trim();
+        if (savedName && typeof navigator !== 'undefined' && !navigator.onLine) {
+          setUser({
+            id: 'offline_session',
+            username: savedName,
+            name: savedName,
+            role: 'admin',
+            email: null,
+          });
+        } else {
+          setUser(null);
         }
       } else {
         setUser(null);
@@ -128,6 +175,7 @@ export function AuthProvider({ children }) {
     }
 
     sessionStorage.setItem('moreira.userName', name);
+    localStorage.setItem('moreira.userName', name);
     let firebaseUser = auth.currentUser;
     try {
       await setPersistence(auth, browserSessionPersistence);
@@ -136,7 +184,19 @@ export function AuthProvider({ children }) {
         firebaseUser = (await signInAnonymously(auth)).user;
       }
     } catch (error) {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        const offlineFallbackUser = {
+          id: firebaseUser?.uid || 'offline_session',
+          username: name,
+          name,
+          role: 'admin',
+          email: null,
+        };
+        setUser(offlineFallbackUser);
+        return { user: offlineFallbackUser };
+      }
       sessionStorage.removeItem('moreira.userName');
+      localStorage.removeItem('moreira.userName');
       throw error;
     }
 
@@ -152,9 +212,12 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
-    if (import.meta.env.MODE !== 'offline') sessionStorage.removeItem('moreira.userName');
+    if (import.meta.env.MODE !== 'offline') {
+      sessionStorage.removeItem('moreira.userName');
+      localStorage.removeItem('moreira.userName');
+    }
     setUser(null);
-    await signOut(auth);
+    await signOut(auth).catch(() => {});
   };
 
   // Wrapper compatível — pages usam api() para fazer chamadas
@@ -304,7 +367,7 @@ export function AuthProvider({ children }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, api, dataVersion }}>
+    <AuthContext.Provider value={{ user, loading, isOnline, login, logout, api, dataVersion }}>
       {initializationError ? <div role="alert">{initializationError}</div> : children}
     </AuthContext.Provider>
   );

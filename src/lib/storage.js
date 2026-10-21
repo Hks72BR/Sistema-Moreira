@@ -27,19 +27,30 @@ async function uploadLocalPhoto(orderId, file, filename, alreadyCompressed = fal
  * Upload de foto para armazenamento local no desenvolvimento e Cloudinary em produção.
  */
 export async function uploadPhotoFile(companyId, orderId, file, filename) {
-  if (import.meta.env.DEV || import.meta.env.MODE === 'offline') {
+  if (import.meta.env.DEV || import.meta.env.MODE === 'offline' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
     return uploadLocalPhoto(orderId, file, filename);
   }
-  return await cloudinaryStorage.uploadPhotoFile(companyId, orderId, file, filename);
+  try {
+    return await cloudinaryStorage.uploadPhotoFile(companyId, orderId, file, filename);
+  } catch (err) {
+    console.warn('Falha no upload Cloudinary (possível queda de internet), salvando foto comprimida localmente:', err);
+    return uploadLocalPhoto(orderId, file, filename);
+  }
 }
 
 /**
- * Upload de foto base64 para armazenamento local no desenvolvimento e Cloudinary em produção.
+ * Upload de foto base64 para armazenamento local no desenvolvimento/offline e Cloudinary em produção.
  */
 export async function uploadPhotoBase64(companyId, orderId, base64String) {
-  if (import.meta.env.DEV || import.meta.env.MODE === 'offline') {
+  if (import.meta.env.DEV || import.meta.env.MODE === 'offline' || (typeof navigator !== 'undefined' && !navigator.onLine)) {
     const compressed = await compressBase64Photo(base64String);
     return uploadLocalPhoto(orderId, compressed, `os-${orderId}-${Date.now()}.jpg`, true);
   }
-  return await cloudinaryStorage.uploadPhotoBase64(companyId, orderId, base64String);
+  try {
+    return await cloudinaryStorage.uploadPhotoBase64(companyId, orderId, base64String);
+  } catch (err) {
+    console.warn('Falha no upload base64 Cloudinary (possível queda de internet), salvando foto comprimida localmente:', err);
+    const compressed = await compressBase64Photo(base64String);
+    return uploadLocalPhoto(orderId, compressed, `os-${orderId}-${Date.now()}.jpg`, true);
+  }
 }

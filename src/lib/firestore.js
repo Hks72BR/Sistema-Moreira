@@ -1,12 +1,85 @@
 import {
-  collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, deleteDoc,
+  collection, doc, getDoc, getDocs,
+  addDoc as rawAddDoc, setDoc as rawSetDoc, updateDoc as rawUpdateDoc, deleteDoc as rawDeleteDoc,
   query, where, orderBy, limit, onSnapshot, serverTimestamp,
-  writeBatch, getCountFromServer, runTransaction
+  writeBatch as rawWriteBatch, getCountFromServer, runTransaction
 } from 'firebase/firestore';
 import { db, COMPANY_ID } from './firebase';
 import { uploadPhotoFile, uploadPhotoBase64 } from './storage';
 
-// ═══ Helpers ═══
+// ═══ Offline-Resilient Helpers ═══
+
+async function awaitWrite(promise) {
+  if (import.meta.env.MODE === 'offline') {
+    return await promise;
+  }
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+  const timeoutMs = isOffline ? 150 : 3500;
+  let timer;
+  return await Promise.race([
+    promise,
+    new Promise(resolve => {
+      timer = setTimeout(() => resolve({ offlineQueued: true }), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function addDoc(collectionRef, data) {
+  if (import.meta.env.MODE === 'offline') {
+    return await rawAddDoc(collectionRef, data);
+  }
+  const ref = doc(collectionRef);
+  await awaitWrite(rawSetDoc(ref, data));
+  return ref;
+}
+
+async function setDoc(reference, data, options) {
+  if (import.meta.env.MODE === 'offline') {
+    return await rawSetDoc(reference, data, options);
+  }
+  return await awaitWrite(options ? rawSetDoc(reference, data, options) : rawSetDoc(reference, data));
+}
+
+async function updateDoc(reference, data) {
+  if (import.meta.env.MODE === 'offline') {
+    return await rawUpdateDoc(reference, data);
+  }
+  return await awaitWrite(rawUpdateDoc(reference, data));
+}
+
+async function deleteDoc(reference) {
+  if (import.meta.env.MODE === 'offline') {
+    return await rawDeleteDoc(reference);
+  }
+  return await awaitWrite(rawDeleteDoc(reference));
+}
+
+function writeBatch(database) {
+  const batch = rawWriteBatch(database);
+  if (import.meta.env.MODE === 'offline') {
+    return batch;
+  }
+  return {
+    set: (...args) => batch.set(...args),
+    update: (...args) => batch.update(...args),
+    delete: (...args) => batch.delete(...args),
+    commit: () => awaitWrite(batch.commit()),
+  };
+}
+
+async function safeCount(collectionRef) {
+  if (typeof navigator !== 'undefined' && !navigator.onLine && import.meta.env.MODE !== 'offline') {
+    const snap = await getDocs(collectionRef);
+    return snap.size ?? snap.docs.length;
+  }
+  try {
+    const countSnap = await getCountFromServer(collectionRef);
+    return countSnap.data().count;
+  } catch {
+    const snap = await getDocs(collectionRef);
+    return snap.size ?? snap.docs.length;
+  }
+}
 
 function col(path) {
   return collection(db, 'companies', COMPANY_ID, ...path.split('/'));
@@ -26,11 +99,11 @@ function clean(obj) {
 
 function toData(snap) {
   if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() };
+  return { id: snap.id, ...snap.data({ serverTimestamps: 'estimate' }) };
 }
 
 function snapToList(snap) {
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  return snap.docs.map(d => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }));
 }
 
 function mergeSnapshots(...snapshots) {
@@ -139,8 +212,7 @@ export async function getClients({ search = '', page = 1, limitCount = 50 } = {}
     };
   }
   q = query(col('clients'), orderBy('name'), limit(limitCount));
-  const countSnap = await getCountFromServer(col('clients'));
-  const total = countSnap.data().count;
+  const total = await safeCount(col('clients'));
   const snap = await getDocs(q);
   return {
     clients: snapToList(snap).map(formatDoc),
@@ -731,23 +803,54 @@ export async function createServiceOrder(data, userId, userName) {
       throw new Error('Este orçamento já possui uma ordem de serviço');
     }
 
-    await runTransaction(db, async transaction => {
-      const budgetSnap = await transaction.get(budgetRef);
+    const applyBudgetConversionBatch = async () => {
+      const budgetSnap = await getDoc(budgetRef);
       if (!budgetSnap.exists()) throw new Error('Orçamento não encontrado');
       if (budgetSnap.data().service_order_id || budgetSnap.data().serviceOrderId) {
         throw new Error('Este orçamento já possui uma ordem de serviço');
       }
-
-      transaction.set(orderRef, orderData);
-      itemWrites.forEach(item => transaction.set(item.ref, item.data));
-      transaction.set(logRef, logData);
-      transaction.update(budgetRef, {
+      const batch = writeBatch(db);
+      batch.set(orderRef, orderData);
+      itemWrites.forEach(item => batch.set(item.ref, item.data));
+      batch.set(logRef, logData);
+      batch.update(budgetRef, {
         status: 'aprovado',
         approved_at: serverTimestamp(),
         updated_at: serverTimestamp(),
         service_order_id: orderRef.id,
       });
-    });
+      await batch.commit();
+    };
+
+    if (import.meta.env.MODE !== 'offline' && typeof navigator !== 'undefined' && !navigator.onLine) {
+      await applyBudgetConversionBatch();
+    } else {
+      try {
+        await runTransaction(db, async transaction => {
+          const budgetSnap = await transaction.get(budgetRef);
+          if (!budgetSnap.exists()) throw new Error('Orçamento não encontrado');
+          if (budgetSnap.data().service_order_id || budgetSnap.data().serviceOrderId) {
+            throw new Error('Este orçamento já possui uma ordem de serviço');
+          }
+
+          transaction.set(orderRef, orderData);
+          itemWrites.forEach(item => transaction.set(item.ref, item.data));
+          transaction.set(logRef, logData);
+          transaction.update(budgetRef, {
+            status: 'aprovado',
+            approved_at: serverTimestamp(),
+            updated_at: serverTimestamp(),
+            service_order_id: orderRef.id,
+          });
+        });
+      } catch (err) {
+        if (import.meta.env.MODE !== 'offline' && !String(err?.message || '').includes('já possui') && !String(err?.message || '').includes('não encontrado')) {
+          await applyBudgetConversionBatch();
+        } else {
+          throw err;
+        }
+      }
+    }
   } else {
     const batch = writeBatch(db);
     batch.set(orderRef, orderData);
@@ -941,10 +1044,10 @@ export async function deletePhotoDoc(orderId, photoId) {
 // ═══ REPORTS ═══
 
 export async function getDashboard() {
-  const [osSnap, budgetSnap, clientCount] = await Promise.all([
+  const [osSnap, budgetSnap, totalClients] = await Promise.all([
     getDocs(col('serviceOrders')),
     getDocs(col('budgets')),
-    getCountFromServer(col('clients')),
+    safeCount(col('clients')),
   ]);
 
   const allOS = snapToList(osSnap).map(formatDoc);
@@ -973,7 +1076,7 @@ export async function getDashboard() {
 
   return {
     osAberta, osConcluida, osEntregue, orcPendente,
-    totalClients: clientCount.data().count,
+    totalClients,
     revenue,
     recentOrders,
     recentBudgets,

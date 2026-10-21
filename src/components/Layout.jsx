@@ -8,7 +8,7 @@ const roleLabels = import.meta.env.MODE === 'offline'
   : { admin: 'Equipe' };
 
 export default function Layout() {
-  const { user, logout } = useAuth();
+  const { user, logout, isOnline } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -35,6 +35,11 @@ export default function Layout() {
       {import.meta.env.MODE === 'offline' && (
         <div role="status" style={{ padding: '8px 16px', background: '#33280f', color: '#f5c76a', textAlign: 'center' }}>
           Demonstracao offline — dados locais, sem sincronizacao. WhatsApp requer internet.
+        </div>
+      )}
+      {import.meta.env.MODE !== 'offline' && !isOnline && (
+        <div role="status" style={{ padding: '8px 16px', background: '#33280f', color: '#f5c76a', textAlign: 'center', fontSize: 13, fontWeight: 500, borderBottom: '1px solid rgba(245,166,35,0.3)' }}>
+          ⚡ Sem internet no momento — Modo Offline ativo. Você pode continuar criando e editando clientes, orçamentos, OS e fotos normalmente; tudo será sincronizado assim que a conexão voltar.
         </div>
       )}
       <header className="topbar">
