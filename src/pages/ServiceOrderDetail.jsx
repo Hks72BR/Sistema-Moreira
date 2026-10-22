@@ -14,6 +14,16 @@ const statusLabels = {
   concluida: 'Concluída', entregue: 'Entregue', cancelada: 'Cancelada'
 };
 const steeringLabels = { hidraulica: 'Hidráulica', eletrica: 'Elétrica', eletrohidraulica: 'Eletro-hidráulica', mecanica: 'Mecânica' };
+const photoPhaseLabels = {
+  entrada: 'Entrada',
+  durante: 'Durante (Progresso)',
+  saida: 'Saída',
+};
+const photoDefaultLabel = {
+  entrada: 'Foto de entrada',
+  durante: 'Foto durante o serviço',
+  saida: 'Foto de saída',
+};
 
 const statusFlow = {
   aberta: ['em_andamento', 'cancelada'],
@@ -225,7 +235,7 @@ export default function ServiceOrderDetail() {
           storagePath: storagePath,
           deleteToken: deleteToken || '',
           originalName: file.name,
-          label: photoPhase === 'entrada' ? 'Foto de entrada' : 'Foto de saída',
+          label: photoDefaultLabel[photoPhase] || 'Foto do veículo',
           phase: photoPhase,
           uploadedBy: user?.id || '',
           uploadedByName: user?.name || '',
@@ -282,7 +292,7 @@ export default function ServiceOrderDetail() {
         storagePath: storagePath,
         deleteToken: deleteToken || '',
         originalName: fileName,
-        label: photoPhase === 'entrada' ? 'Foto de entrada' : 'Foto de saída',
+        label: photoDefaultLabel[photoPhase] || 'Foto do veículo',
         phase: photoPhase,
         uploadedBy: user?.id || '',
         uploadedByName: user?.name || '',
@@ -439,6 +449,7 @@ export default function ServiceOrderDetail() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <select value={photoPhase} onChange={e => setPhotoPhase(e.target.value)} style={{ width: 'auto', padding: '6px 32px 6px 10px', fontSize: 13 }}>
                   <option value="entrada">Entrada</option>
+                  <option value="durante">Durante (Progresso)</option>
                   <option value="saida">Saída</option>
                 </select>
                 <button className="btn btn-outline btn-sm" onClick={() => fileInputRef.current?.click()} disabled={uploadingPhoto}>
@@ -456,16 +467,31 @@ export default function ServiceOrderDetail() {
               <div className="empty-state" style={{ padding: 30 }}>
                 <div className="icon"><Icon name="camera" size={34} /></div>
                 <p>Nenhuma foto registrada</p>
-                <p style={{ fontSize: 12, marginTop: 4 }}>Tire fotos do veículo antes de iniciar o serviço</p>
+                <p style={{ fontSize: 12, marginTop: 4 }}>Registre fotos de entrada, durante o progresso do serviço e na saída</p>
               </div>
             ) : (
               <>
                 {/* Entrada photos */}
                 {photos.filter(p => p.phase === 'entrada').length > 0 && (
                   <div className="photos-section">
-                    <h3 style={{ color: 'var(--info)' }}>Fotos de Entrada</h3>
+                    <h3 style={{ color: 'var(--info)' }}>🔵 Fotos de Entrada</h3>
                     <div className="photos-grid">
                       {photos.filter(p => p.phase === 'entrada').map(photo => (
+                        <div key={photo.id} className="photo-card" onClick={() => setLightboxPhoto(photo)}>
+                          <img src={photoDataUrls[photo.id] || ''} alt={photo.label} loading="lazy" />
+                          <button className="photo-delete" onClick={(e) => { e.stopPropagation(); deletePhoto(photo.id); }}>✕</button>
+                          <div className="photo-label">{new Date(photo.createdAt || photo.created_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Durante (Progresso) photos */}
+                {photos.filter(p => p.phase === 'durante').length > 0 && (
+                  <div className="photos-section">
+                    <h3 style={{ color: 'var(--warning)' }}>🟡 Fotos Durante o Serviço (Progresso)</h3>
+                    <div className="photos-grid">
+                      {photos.filter(p => p.phase === 'durante').map(photo => (
                         <div key={photo.id} className="photo-card" onClick={() => setLightboxPhoto(photo)}>
                           <img src={photoDataUrls[photo.id] || ''} alt={photo.label} loading="lazy" />
                           <button className="photo-delete" onClick={(e) => { e.stopPropagation(); deletePhoto(photo.id); }}>✕</button>
@@ -697,7 +723,7 @@ export default function ServiceOrderDetail() {
       {showCamera && (
         <div className="modal-overlay" onClick={closeCamera}>
           <div className="modal camera-modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 700 }}>
-            <h3><Icon name="camera" /> Capturar Foto ({photoPhase === 'entrada' ? 'Entrada' : 'Saída'})</h3>
+            <h3><Icon name="camera" /> Capturar Foto ({photoPhaseLabels[photoPhase] || 'Entrada'})</h3>
             <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', borderRadius: 10, background: '#000' }} />
             <div className="camera-controls">
               <button className="btn btn-outline" onClick={closeCamera}>Cancelar</button>
