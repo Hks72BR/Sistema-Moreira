@@ -14,7 +14,7 @@ import {
   signOut,
   updatePassword,
 } from 'firebase/auth';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, limit } from 'firebase/firestore';
 import { auth, db, COMPANY_ID } from '../lib/firebase';
 import * as firestoreApi from '../lib/firestore';
 
@@ -143,9 +143,21 @@ export function AuthProvider({ children }) {
     };
 
     try {
-      for (const path of ['clients', 'vehicles', 'budgets', 'serviceOrders', 'invoices']) {
-        listen(collection(db, 'companies', COMPANY_ID, path), path);
-      }
+      // Otimização: escutar apenas ordens de serviço ativas e orçamentos pendentes
+      // Evita baixar mais de 9.000 documentos históricos no login
+      const activeOrdersQuery = query(
+        collection(db, 'companies', COMPANY_ID, 'serviceOrders'),
+        where('status', 'in', ['aberta', 'em_andamento', 'aguardando_peca']),
+        limit(30)
+      );
+      listen(activeOrdersQuery, 'activeServiceOrders');
+
+      const pendingBudgetsQuery = query(
+        collection(db, 'companies', COMPANY_ID, 'budgets'),
+        where('status', '==', 'pendente'),
+        limit(20)
+      );
+      listen(pendingBudgetsQuery, 'pendingBudgets');
     } catch (error) {
       console.error('Falha ao iniciar a sincronizacao em tempo real:', error);
     }

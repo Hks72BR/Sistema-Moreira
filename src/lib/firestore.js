@@ -189,35 +189,40 @@ async function generateCode(prefix) {
 
 // ═══ CLIENTS ═══
 
+let _cachedClients = null;
+let _cachedClientsTimestamp = 0;
+const CLIENT_CACHE_TTL = 90 * 1000; // 90s cache em memória (evita baixar 2.000 clientes a cada tecla)
+
+export function invalidateClientsCache() {
+  _cachedClients = null;
+  _cachedClientsTimestamp = 0;
+}
+
 export async function getClients({ search = '', page = 1, limitCount = 50 } = {}) {
-  let q;
+  const now = Date.now();
+  if (!_cachedClients || (now - _cachedClientsTimestamp > CLIENT_CACHE_TTL)) {
+    const snap = await getDocs(query(col('clients'), orderBy('name')));
+    _cachedClients = snapToList(snap).map(formatDoc);
+    _cachedClientsTimestamp = now;
+  }
+
+  let list = _cachedClients;
   if (search) {
-    // Firestore não tem LIKE — buscar todos e filtrar client-side
-    q = query(col('clients'), orderBy('name'));
-    const snap = await getDocs(q);
-    const all = snapToList(snap).map(formatDoc);
-    const s = search.toLowerCase();
-    const filtered = all.filter(c =>
+    const s = search.toLowerCase().trim();
+    list = list.filter(c =>
       (c.name || '').toLowerCase().includes(s) ||
       (c.cpf_cnpj || c.cpfCnpj || '').includes(s) ||
       (c.phone || '').includes(s) ||
       (c.email || '').toLowerCase().includes(s)
     );
-    const start = (page - 1) * limitCount;
-    return {
-      clients: filtered.slice(start, start + limitCount),
-      total: filtered.length,
-      page,
-      pages: Math.ceil(filtered.length / limitCount)
-    };
   }
-  q = query(col('clients'), orderBy('name'), limit(limitCount));
-  const total = await safeCount(col('clients'));
-  const snap = await getDocs(q);
+
+  const total = list.length;
+  const start = (page - 1) * limitCount;
   return {
-    clients: snapToList(snap).map(formatDoc),
+    clients: list.slice(start, start + limitCount),
     total,
-    page: 1,
+    page,
     pages: Math.ceil(total / limitCount)
   };
 }
@@ -267,6 +272,7 @@ export async function getClient(clientId) {
 }
 
 export async function createClient(data) {
+  invalidateClientsCache();
   const docData = clean({
     name: data.name,
     type: data.type || 'pf',
@@ -289,6 +295,7 @@ export async function createClient(data) {
 }
 
 export async function updateClient(clientId, data) {
+  invalidateClientsCache();
   const ref = docRef(`clients/${clientId}`);
   const snap = await getDoc(ref);
   if (!snap.exists()) throw new Error('Cliente não encontrado');
@@ -312,6 +319,7 @@ export async function updateClient(clientId, data) {
 }
 
 export async function deleteClient(clientId) {
+  invalidateClientsCache();
   // Verificar se tem OS
   const [legacySnap, currentSnap] = await Promise.all([
     getDocs(query(col('serviceOrders'), where('clientId', '==', clientId), limit(1))),
@@ -614,37 +622,48 @@ export async function deleteBudget(budgetId) {
 // ═══ SERVICE ORDERS ═══
 
 export async function getServiceOrders({ status, assignedTo, search = '', page = 1, limitCount = 50 } = {}) {
-  // Sem orderBy quando há where (evita exigir índice)
-  let constraints = [];
-  if (status) constraints.push(where('status', '==', status));
+  let list = [];
+  let total = 0;
 
-  const q = query(col('serviceOrders'), ...constraints);
-  const snap = await getDocs(q);
-  let list = snapToList(snap).map(formatDoc);
+  if (search) {
+    const s = search.toLowerCase().trim();
+    // Busca otimizada: busca no topo recente (limite 500) para resposta rápida sem travar o browser
+    const snap = await getDocs(query(col('serviceOrders'), limit(500)));
+    list = snapToList(snap).map(formatDoc).filter(o =>
+      (o.client_name || o.clientName || '').toLowerCase().includes(s) ||
+      (o.code || '').toLowerCase().includes(s) ||
+      (o.plate || o.vehiclePlate || '').toLowerCase().includes(s)
+    );
+    total = list.length;
+  } else if (status) {
+    const q = query(col('serviceOrders'), where('status', '==', status));
+    const snap = await getDocs(q);
+    list = snapToList(snap).map(formatDoc);
+    total = list.length;
+  } else {
+    // Visão geral das ordens: carregar bloco recente de até 150 itens paginados rapidamente
+    const q = query(col('serviceOrders'), limit(150));
+    const [snap, totalCount] = await Promise.all([
+      getDocs(q),
+      safeCount(col('serviceOrders'))
+    ]);
+    list = snapToList(snap).map(formatDoc);
+    total = totalCount;
+  }
 
   if (assignedTo) {
     list = list.filter(order => (order.assigned_to || order.assignedTo) === assignedTo);
   }
 
-  if (search) {
-    const s = search.toLowerCase();
-    list = list.filter(o =>
-      (o.client_name || o.clientName || '').toLowerCase().includes(s) ||
-      (o.code || '').toLowerCase().includes(s) ||
-      (o.plate || o.vehiclePlate || '').toLowerCase().includes(s)
-    );
-  }
-
-  // Ordenar em JavaScript por status priority depois data
+  // Ordenação prioritária: ordens abertas primeiro, depois por data mais recente
   const STATUS_ORDER = { aberta: 0, em_andamento: 1, aguardando_peca: 2, concluida: 3, entregue: 4, cancelada: 5 };
   list.sort((a, b) => {
     const aOrder = STATUS_ORDER[a.status] ?? 99;
     const bOrder = STATUS_ORDER[b.status] ?? 99;
     if (aOrder !== bOrder) return aOrder - bOrder;
-    return new Date(b.created_at || b.createdAt) - new Date(a.created_at || a.createdAt);
+    return new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0);
   });
 
-  const total = list.length;
   const start = (page - 1) * limitCount;
   return {
     orders: list.slice(start, start + limitCount),
@@ -1121,40 +1140,41 @@ export async function deletePhotoDoc(orderId, photoId) {
 // ═══ REPORTS ═══
 
 export async function getDashboard() {
-  const [osSnap, budgetSnap, totalClients] = await Promise.all([
-    getDocs(col('serviceOrders')),
-    getDocs(col('budgets')),
+  // Agregações no servidor com safeCount (zero documentos baixados para calcular os cards)
+  const [
+    totalClients,
+    osAberta,
+    osConcluida,
+    osEntregue,
+    orcPendente,
+    recentOrdersSnap,
+    recentBudgetsSnap,
+  ] = await Promise.all([
     safeCount(col('clients')),
+    safeCount(query(col('serviceOrders'), where('status', 'in', ['aberta', 'em_andamento', 'aguardando_peca']))),
+    safeCount(query(col('serviceOrders'), where('status', '==', 'concluida'))),
+    safeCount(query(col('serviceOrders'), where('status', '==', 'entregue'))),
+    safeCount(query(col('budgets'), where('status', '==', 'pendente'))),
+    getDocs(query(col('serviceOrders'), limit(15))),
+    getDocs(query(col('budgets'), limit(15))),
   ]);
 
-  const allOS = snapToList(osSnap).map(formatDoc);
-  const allBudgets = snapToList(budgetSnap).map(formatDoc);
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const recentOrders = snapToList(recentOrdersSnap)
+    .map(formatDoc)
+    .sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0))
+    .slice(0, 10);
 
-  const osAberta = allOS.filter(o => ['aberta', 'em_andamento', 'aguardando_peca'].includes(o.status)).length;
-  const osConcluida = allOS.filter(o => o.status === 'concluida').length;
-  const osEntregue = allOS.filter(o => o.status === 'entregue' && (o.delivered_at || o.deliveredAt) >= thirtyDaysAgo).length;
-  const orcPendente = allBudgets.filter(b => b.status === 'pendente').length;
-
-  // Receita dos últimos 30 dias (somar itens de OS concluídas/entregues)
-  const recentCompletedIds = allOS
-    .filter(o => ['concluida', 'entregue'].includes(o.status) && (o.completed_at || o.completedAt) >= thirtyDaysAgo)
-    .map(o => o.id);
-
-  let revenue = 0;
-  for (const osId of recentCompletedIds.slice(0, 20)) {
-    const itemsSnap = await getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', osId, 'items'));
-    revenue += snapToList(itemsSnap).reduce((sum, i) => sum + (i.total || 0), 0);
-  }
-
-  // Recentes
-  const recentOrders = allOS.sort((a, b) => (b.created_at || b.createdAt || '').localeCompare(a.created_at || a.createdAt || '')).slice(0, 10);
-  const recentBudgets = allBudgets.sort((a, b) => (b.created_at || b.createdAt || '').localeCompare(a.created_at || a.createdAt || '')).slice(0, 10);
+  const recentBudgets = snapToList(recentBudgetsSnap)
+    .map(formatDoc)
+    .sort((a, b) => new Date(b.created_at || b.createdAt || 0) - new Date(a.created_at || a.createdAt || 0))
+    .slice(0, 10);
 
   return {
-    osAberta, osConcluida, osEntregue, orcPendente,
+    osAberta,
+    osConcluida,
+    osEntregue,
+    orcPendente,
     totalClients,
-    revenue,
     recentOrders,
     recentBudgets,
   };
@@ -1179,24 +1199,15 @@ export async function getMonthlyReport(month, year) {
       return createdAt >= yearStart && createdAt < yearEnd;
     });
 
-  // Carregar itens de todas as OS do ano em paralelo para montar evolução anual e totais por OS
-  await Promise.all(
-    allYearOrders.map(async (order) => {
-      const itemsSnap = await getDocs(collection(db, 'companies', COMPANY_ID, 'serviceOrders', order.id, 'items'));
-      const items = snapToList(itemsSnap).map(formatDoc);
-      const serviceTotal = items
-        .filter(i => i.type !== 'peca')
-        .reduce((sum, i) => sum + (Number(i.total) || 0), 0);
-      const partsTotal = items
-        .filter(i => i.type === 'peca')
-        .reduce((sum, i) => sum + (Number(i.total) || 0), 0);
-      order.items = items;
-      order.service_total = serviceTotal;
-      order.parts_total = partsTotal;
-      order.total = serviceTotal + partsTotal;
-      order.assigned_name = order.assigned_to_name || order.assignedToName || order.assigned_name || '';
-    })
-  );
+    // Otimização de performance: utilizar o total já salvo em cada OS (evita centenas de consultas lentas a subcoleções)
+  allYearOrders.forEach((order) => {
+    const totalVal = Number(order.total) || Number(order.budget_total) || 0;
+    order.items = order.items || [];
+    order.service_total = Number(order.service_total) || totalVal;
+    order.parts_total = Number(order.parts_total) || 0;
+    order.total = totalVal;
+    order.assigned_name = order.assigned_to_name || order.assignedToName || order.assigned_name || '';
+  });
 
   // Evolução mês a mês do ano selecionado (1 a 12)
   const yearlyBreakdown = Array.from({ length: 12 }, (_, idx) => {
