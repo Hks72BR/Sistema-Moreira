@@ -328,13 +328,31 @@ export default function Settings() {
       {/* Documents */}
       {canManageSettings && (
         <div className="card">
-          <div className="card-header"><h3>📄 Documentos</h3></div>
-          <div style={{ padding: 20, background: 'var(--bg-surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
-            <h4 style={{ color: 'var(--gold)', marginBottom: 8, fontSize: 14 }}>Manual de Padronização</h4>
-            <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 16, lineHeight: 1.5 }}>
-              Plano completo de uso do sistema: identificação da equipe, fluxo de atendimento, categorias de serviço, regras de fotos e boas práticas.
-            </p>
-            <button className="btn btn-primary" onClick={generatePlanPDF}>📥 Baixar PDF do Manual</button>
+          <div className="card-header"><h3>📄 Documentação & Manuais</h3></div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+            <div style={{ padding: 20, background: 'linear-gradient(135deg, rgba(245,166,35,0.12) 0%, var(--bg-surface) 100%)', borderRadius: 'var(--radius)', border: '1px solid rgba(245,166,35,0.4)' }}>
+              <div style={{ display: 'inline-block', padding: '3px 8px', borderRadius: 999, background: 'rgba(245,166,35,0.2)', color: 'var(--gold)', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', marginBottom: 8 }}>
+                Oficial • Produto Premium
+              </div>
+              <h4 style={{ color: '#FFF', marginBottom: 6, fontSize: 15, fontWeight: 700 }}>📘 Manual Oficial do Sistema (PDF)</h4>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 16, lineHeight: 1.5 }}>
+                Documento completo ilustrado no tema exclusivo Moreira Direções: explicação de todos os módulos, fluxo ponta a ponta, fotos em 3 etapas (Entrada/Durante/Saída), catálogo, modo offline e guia de instalação.
+              </p>
+              <a href="/Manual-Moreira-Direcoes.pdf" download="Manual-Moreira-Direcoes.pdf" target="_blank" rel="noopener noreferrer" className="btn btn-primary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                📥 Baixar Manual Completo (PDF)
+              </a>
+            </div>
+
+            <div style={{ padding: 20, background: 'var(--bg-surface)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'inline-block', padding: '3px 8px', borderRadius: 999, background: 'rgba(43,127,255,0.15)', color: 'var(--blue-light)', fontSize: 10, fontWeight: 800, textTransform: 'uppercase', marginBottom: 8 }}>
+                Procedimentos Operacionais
+              </div>
+              <h4 style={{ color: 'var(--text)', marginBottom: 6, fontSize: 15, fontWeight: 700 }}>📄 Manual de Padronização</h4>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 16, lineHeight: 1.5 }}>
+                Plano de padronização da equipe da oficina: categorias de serviço, boas práticas de atendimento e checklist.
+              </p>
+              <button type="button" className="btn btn-outline" onClick={generatePlanPDF}>📥 Gerar Documento</button>
+            </div>
           </div>
         </div>
       )}

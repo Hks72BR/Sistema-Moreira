@@ -73,3 +73,4 @@ export async function deleteStoredPhoto(photo) {
     await cloudinaryStorage.deleteCloudinaryPhoto(photo.deleteToken);
   }
 }
+
